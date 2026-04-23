@@ -1,0 +1,37 @@
+# Environment / secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Data (never commit PostNL trip data)
+data/
+*.xlsx
+*.xls
+*.csv
+*.parquet
+!requirements.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Conductor workspace context (kept local, not in repo)
+.context/
