@@ -85,6 +85,17 @@ def unique_segments(stops: pd.DataFrame) -> list[tuple[float, float, float, floa
     return list(segs)
 
 
+def load_cached_routes(
+    segments: list[tuple[float, float, float, float]],
+) -> tuple[dict[tuple, list[tuple[float, float]]], int]:
+    """Return (routes_dict, n_missing) — pakt alleen wat al in cache zit."""
+    if not CACHE_PATH.exists():
+        return {}, len(segments)
+    cache = _load_cache()
+    found = {s: cache[s] for s in segments if s in cache}
+    return found, len(segments) - len(found)
+
+
 def fetch_routes(
     segments: list[tuple[float, float, float, float]],
     progress_cb=None,

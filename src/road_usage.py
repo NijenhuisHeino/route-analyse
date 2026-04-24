@@ -7,9 +7,23 @@ folium HeatMap so busy corridors pop out as charging-hotspot candidates.
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict
+
 import pandas as pd
 
 from src.routing import trip_polyline
+
+
+def _haversine_km(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    r = 6371.0
+    lat1, lon1 = p1
+    lat2, lon2 = p2
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
 
 
 def compute_road_heatmap_points(
@@ -83,6 +97,73 @@ def compute_weighted_edges(
             edge_wagens.setdefault(key, set()).add(str(wagen))
 
     return [(p1, p2, len(wagens)) for (p1, p2), wagens in edge_wagens.items()]
+
+
+def compute_corridors(
+    edges: list[tuple[tuple[float, float], tuple[float, float], int]],
+    threshold: int,
+) -> list[dict]:
+    """Groepeer aaneengesloten wegvlakken boven drempel tot corridors.
+
+    Richting wordt genegeerd (heen + terug = zelfde corridor).
+    Retourneert lijst dicts met: edges, length_km, max_n, median_n, center,
+    gesorteerd op length_km (langst eerst).
+    """
+    merged: dict[tuple, int] = {}
+    for p1, p2, n in edges:
+        if n < threshold:
+            continue
+        key = (p1, p2) if p1 < p2 else (p2, p1)
+        merged[key] = max(merged.get(key, 0), n)
+
+    if not merged:
+        return []
+
+    adj: dict[tuple, list[tuple]] = defaultdict(list)
+    for (a, b), n in merged.items():
+        adj[a].append((b, n))
+        adj[b].append((a, n))
+
+    visited: set = set()
+    corridors: list[dict] = []
+    for node in list(adj.keys()):
+        if node in visited:
+            continue
+        component: set = set()
+        stack = [node]
+        while stack:
+            nd = stack.pop()
+            if nd in component:
+                continue
+            component.add(nd)
+            for nb, _ in adj[nd]:
+                if nb not in component:
+                    stack.append(nb)
+        visited |= component
+
+        comp_edges = [
+            (a, b, n) for (a, b), n in merged.items() if a in component
+        ]
+        total_km = sum(_haversine_km(a, b) for a, b, _ in comp_edges)
+        counts = sorted(n for _, _, n in comp_edges)
+        max_n = counts[-1]
+        median_n = counts[len(counts) // 2]
+        lats = [p[0] for a, b, _ in comp_edges for p in (a, b)]
+        lons = [p[1] for a, b, _ in comp_edges for p in (a, b)]
+        center = ((min(lats) + max(lats)) / 2, (min(lons) + max(lons)) / 2)
+
+        corridors.append(
+            {
+                "edges": comp_edges,
+                "length_km": total_km,
+                "max_n": max_n,
+                "median_n": median_n,
+                "center": center,
+            }
+        )
+
+    corridors.sort(key=lambda c: (c["length_km"], c["max_n"]), reverse=True)
+    return corridors
 
 
 def lerp_hex(lo: str, hi: str, t: float) -> str:
