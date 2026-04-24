@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import folium
@@ -44,6 +46,15 @@ from src.routing import (
 )
 
 load_dotenv()
+
+# Streamlit Cloud zet secrets in st.secrets; bridge naar env zodat bestaande
+# os.getenv-lookups in src/ modules ook werken.
+try:
+    for _k in ("OCM_API_KEY", "DATA_DIR"):
+        if _k in st.secrets and not os.getenv(_k):
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
 
 DEFAULT_DATA_DIR = (
     "/Users/johnnynijenhuis/Library/CloudStorage/"
@@ -266,6 +277,16 @@ def _load_chargers(min_power_kw: float) -> pd.DataFrame:
     return fetch_chargers(min_power_kw=min_power_kw)
 
 
+def _persist_upload(uploaded_file) -> Path:
+    """Save uploaded bytes to a deterministic tempfile path for cache reuse."""
+    data = uploaded_file.getbuffer()
+    h = hashlib.sha1(data).hexdigest()[:12]
+    dst = Path(tempfile.gettempdir()) / f"postnl-upload-{h}.xlsx"
+    if not dst.exists():
+        dst.write_bytes(data)
+    return dst
+
+
 def _render_dashboard(
     stops: pd.DataFrame,
     chargers_df: pd.DataFrame,
@@ -475,32 +496,64 @@ def main() -> None:
         if "data_dir" not in st.session_state:
             st.session_state.data_dir = os.getenv("DATA_DIR", DEFAULT_DATA_DIR)
 
-        c1, c2 = st.columns([4, 1])
-        with c2:
-            st.write("")
-            st.write("")
-            if st.button("📂", help="Kies map in Finder"):
-                picked = _pick_directory_finder(st.session_state.data_dir)
-                if picked:
-                    st.session_state.data_dir = picked
-                    st.rerun()
-        with c1:
-            st.text_input(
-                "Data-map",
-                key="data_dir",
-                help="Map met Excel-rittenexports (bv. Google Drive map).",
+        data_dir = Path(st.session_state.data_dir)
+        drive_files = list_excel_files(data_dir) if data_dir.exists() else []
+
+        if drive_files:
+            mode = st.radio(
+                "Bron",
+                ["📁 Map", "📤 Upload"],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+        else:
+            mode = "📤 Upload"
+            st.caption(
+                f"Map niet gevonden of leeg ({data_dir}) — gebruik upload."
             )
 
-        data_dir = Path(st.session_state.data_dir)
+        excel_path: Path | None = None
 
-        files = list_excel_files(data_dir)
-        if not files:
-            st.error(f"Geen .xlsx bestanden gevonden in:\n{data_dir}")
-            st.stop()
+        if mode == "📁 Map":
+            c1, c2 = st.columns([4, 1])
+            with c2:
+                st.write("")
+                st.write("")
+                if st.button("📂", help="Kies map in Finder"):
+                    picked = _pick_directory_finder(st.session_state.data_dir)
+                    if picked:
+                        st.session_state.data_dir = picked
+                        st.rerun()
+            with c1:
+                st.text_input(
+                    "Data-map",
+                    key="data_dir",
+                    help="Map met Excel-rittenexports (bv. Google Drive map).",
+                )
 
-        file_names = [f.name for f in files]
-        choice = st.selectbox("Bestand", file_names, index=0)
-        excel_path = data_dir / choice
+            data_dir = Path(st.session_state.data_dir)
+            files = list_excel_files(data_dir)
+            if not files:
+                st.error(f"Geen .xlsx bestanden gevonden in:\n{data_dir}")
+                st.stop()
+
+            file_names = [f.name for f in files]
+            choice = st.selectbox("Bestand", file_names, index=0)
+            excel_path = data_dir / choice
+        else:
+            uploaded = st.file_uploader(
+                "Excel-bestand (.xlsx)",
+                type=["xlsx"],
+                help=(
+                    "Upload een TRP BI trip-stop export of Rittendata per wagen. "
+                    "Bestand wordt lokaal verwerkt, niet opgeslagen."
+                ),
+            )
+            if uploaded is None:
+                st.info("Wachten op upload…")
+                st.stop()
+            excel_path = _persist_upload(uploaded)
+            st.caption(f"Geladen: **{uploaded.name}** ({uploaded.size // 1024} KB)")
 
     try:
         schema, sheet = detect_schema(excel_path)
