@@ -30,6 +30,7 @@ from src.data_loader import (
 )
 from src.geocoder import reverse_geocode
 from src.csv_loader import list_monthly_csvs, load_monthly_csvs
+from src.simulation import charge_hotspots, simulate_soc
 from src.summary_loader import load_trip_summaries
 from src.hotspots import rank_hotspots
 from src.road_usage import (
@@ -306,6 +307,167 @@ def _persist_upload(uploaded_file) -> Path:
     if not dst.exists():
         dst.write_bytes(data)
     return dst
+
+
+def _render_simulation(stops: pd.DataFrame) -> None:
+    """Verbruiks-/SoC-simulatie tab: parameters, resultaten, charge-hotspots."""
+    st.subheader("eTruck verbruiks- en laadsimulatie")
+    st.caption(
+        "Indicatieve simulatie: per trip wordt SoC berekend op basis van "
+        "haversine-afstand × verbruik. Waar de SoC onder de drempel komt, "
+        "wordt een laad-event geplaatst. Aggregeert tot kandidaat-laadlocaties."
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        kwh_per_km = st.number_input(
+            "Verbruik (kWh/km)",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.2,
+            step=0.1,
+            help="Typisch voor zware eTruck: 1.0-1.6 kWh/km afhankelijk van belading.",
+        )
+        capacity = st.number_input(
+            "Batterij netto (kWh)",
+            min_value=100,
+            max_value=1500,
+            value=590,
+            step=10,
+            help="Bruikbare capaciteit (na buffers van fabrikant).",
+        )
+    with c2:
+        start_soc = st.slider(
+            "Start SoC (%)", min_value=50, max_value=100, value=100, step=5
+        )
+        soc_threshold = st.slider(
+            "Min. SoC drempel (%)",
+            min_value=5,
+            max_value=30,
+            value=15,
+            step=1,
+            help="Onder deze drempel triggert een laad-event.",
+        )
+    with c3:
+        max_kw = st.number_input(
+            "Max laadvermogen (kW)",
+            min_value=50,
+            max_value=1000,
+            value=350,
+            step=50,
+            help="Bepaalt laadtijd: kWh ÷ kW × 60 = minuten.",
+        )
+        st.write("")
+        st.write("")
+        st.caption("Aanname: bij laden wordt opgeladen tot 100%.")
+
+    if stops.empty:
+        st.info("Geen stops om te simuleren — pas filters aan.")
+        return
+
+    with st.spinner("SoC-traject berekenen..."):
+        sim = simulate_soc(
+            stops,
+            kwh_per_km=kwh_per_km,
+            capacity_kwh=capacity,
+            start_soc_pct=start_soc,
+            threshold_pct=soc_threshold,
+            max_charge_kw=max_kw,
+        )
+
+    n_events = int(sim["charge_event"].sum())
+    n_trips = sim["trip_id"].nunique()
+    n_trips_charging = sim.loc[sim["charge_event"], "trip_id"].nunique()
+    total_kwh = float(sim["charge_kwh"].sum())
+    total_min = float(sim["charge_min"].sum())
+
+    st.divider()
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Trips", f"{n_trips:,}".replace(",", "."))
+    k2.metric(
+        "Trips met laad-event",
+        f"{n_trips_charging:,}".replace(",", "."),
+        f"{(100 * n_trips_charging / max(n_trips, 1)):.0f}% van totaal",
+    )
+    k3.metric("Laad-events totaal", f"{n_events:,}".replace(",", "."))
+    k4.metric(
+        "Geschatte laadtijd totaal",
+        f"{total_min / 60:,.0f} uur".replace(",", "."),
+        f"{total_kwh:,.0f} kWh".replace(",", "."),
+    )
+
+    st.divider()
+
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        st.subheader("Top-50 kandidaat-laadlocaties")
+        st.caption(
+            "Locaties waar trucks volgens deze simulatie het vaakst zouden moeten laden."
+        )
+        hotspots = charge_hotspots(sim, top_n=50)
+        if hotspots.empty:
+            st.info("Geen laad-events bij deze parameters.")
+        else:
+            hotspots_view = hotspots.copy()
+            hotspots_view["maps"] = hotspots_view.apply(
+                lambda r: f"https://www.google.com/maps?q={r['lat']},{r['lon']}",
+                axis=1,
+            )
+            st.dataframe(
+                hotspots_view[
+                    [
+                        "adres",
+                        "n_events",
+                        "n_unieke_wagens",
+                        "totaal_kwh",
+                        "gem_min",
+                        "maps",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "maps": st.column_config.LinkColumn(
+                        "Kaart", display_text="📍 Open"
+                    ),
+                },
+            )
+            st.download_button(
+                "Download kandidaat-laadlocaties als CSV",
+                data=hotspots.to_csv(index=False).encode("utf-8"),
+                file_name="kandidaat_laadlocaties.csv",
+                mime="text/csv",
+                key="dl_charge_hotspots",
+            )
+
+    with col_right:
+        st.subheader("Per-trip overzicht")
+        per_trip = (
+            sim.groupby("trip_id")
+            .agg(
+                stops=("stop_seq", "size"),
+                trip_km=("segment_km", "sum"),
+                eind_soc_pct=("soc_pct_aankomst", "last"),
+                laad_events=("charge_event", "sum"),
+                laad_kwh=("charge_kwh", "sum"),
+                laad_min=("charge_min", "sum"),
+            )
+            .reset_index()
+        )
+        per_trip["trip_km"] = per_trip["trip_km"].round(1)
+        per_trip["laad_kwh"] = per_trip["laad_kwh"].round(0)
+        per_trip["laad_min"] = per_trip["laad_min"].round(0)
+        per_trip = per_trip.sort_values("laad_events", ascending=False).head(100)
+        st.dataframe(
+            per_trip,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            f"Top 100 trips gerangschikt op aantal laad-events. "
+            f"Totaal {n_trips:,} trips gesimuleerd.".replace(",", ".")
+        )
 
 
 def _render_dashboard(
@@ -826,7 +988,9 @@ def main() -> None:
         st.warning("Geen stops over na filtering. Pas filters aan.")
         return
 
-    tab_map, tab_dash = st.tabs(["🗺️ Kaart", "📊 Dashboard"])
+    tab_map, tab_dash, tab_sim = st.tabs(
+        ["🗺️ Kaart", "📊 Dashboard", "🔋 Simulatie"]
+    )
 
     chargers_df = pd.DataFrame()
     charger_error: str | None = None
@@ -1028,6 +1192,9 @@ def main() -> None:
 
     with tab_dash:
         _render_dashboard(stops, chargers_df, road_threshold)
+
+    with tab_sim:
+        _render_simulation(stops)
 
 
 if __name__ == "__main__":
