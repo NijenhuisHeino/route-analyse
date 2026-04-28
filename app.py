@@ -912,6 +912,15 @@ def main() -> None:
                         f"Geen wegvlak heeft ≥ {road_threshold} unieke wagens "
                         f"(max in dataset = {max_n}). Zet de drempel lager."
                     )
+                POLYLINE_CAP = 5000
+                if len(kept) > POLYLINE_CAP:
+                    kept_sorted = sorted(kept, key=lambda e: e[2], reverse=True)
+                    kept = kept_sorted[:POLYLINE_CAP]
+                    st.info(
+                        f"ℹ️ {len(kept_sorted):,} wegvlakken boven drempel — "
+                        f"alleen drukste {POLYLINE_CAP} getekend om browser te "
+                        "ontlasten. Verhoog drempel voor minder lijnen."
+                    )
                 denom = max(1, max_n - road_threshold)
                 for p1, p2, n in kept:
                     t = (n - road_threshold) / denom
@@ -925,7 +934,15 @@ def main() -> None:
                         tooltip=f"{n} unieke wagens",
                     ).add_to(fmap)
         elif show_routes:
-            for _, g in stops.groupby(["wagencode", "trip_date", "trip_id"]):
+            TRIP_CAP = 2000
+            trip_groups = list(stops.groupby(["wagencode", "trip_date", "trip_id"]))
+            if len(trip_groups) > TRIP_CAP:
+                st.info(
+                    f"ℹ️ {len(trip_groups):,} trips — alleen eerste {TRIP_CAP} "
+                    "getekend (rechte lijnen). Filter eerst voor specifieke trips."
+                )
+                trip_groups = trip_groups[:TRIP_CAP]
+            for _, g in trip_groups:
                 if len(g) < 2:
                     continue
                 coords = g[["lat", "lon"]].values.tolist()
