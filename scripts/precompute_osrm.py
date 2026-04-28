@@ -102,6 +102,13 @@ def main() -> None:
             f"{_fmt(time.time() - m_start)}, totaal cache: {len(cache):,}",
             flush=True,
         )
+        try:
+            from scripts.sync_cache import backup as sync_backup
+
+            print(f"  Backup naar Drive na {month}...", flush=True)
+            sync_backup()
+        except Exception as e:
+            print(f"  Backup faalde (lokale cache wel veilig): {e}", flush=True)
 
     print(
         f"[{time.strftime('%H:%M:%S')}] KLAAR — "
