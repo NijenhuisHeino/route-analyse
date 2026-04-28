@@ -99,8 +99,13 @@ def load_cached_routes(
 def fetch_routes(
     segments: list[tuple[float, float, float, float]],
     progress_cb=None,
+    save_every: int = 200,
 ) -> dict[tuple, list[tuple[float, float]]]:
-    """Fetch road geometry for each segment, using (and updating) disk cache."""
+    """Fetch road geometry for each segment, using (and updating) disk cache.
+
+    Cache wordt elke `save_every` segmenten naar disk geschreven, zodat
+    onderbrekingen (Cloudflare timeouts, kill, etc.) weinig progress kosten.
+    """
     cache = _load_cache()
     missing = [s for s in segments if s not in cache]
     total = len(missing)
@@ -114,6 +119,8 @@ def fetch_routes(
         if progress_cb:
             progress_cb(i, total)
         time.sleep(SEGMENT_THROTTLE_S)
+        if i % save_every == 0:
+            _save_cache(cache)
 
     if missing:
         _save_cache(cache)

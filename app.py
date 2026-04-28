@@ -29,6 +29,7 @@ from src.data_loader import (
     load_trips,
 )
 from src.geocoder import reverse_geocode
+from src.csv_loader import list_monthly_csvs, load_monthly_csvs
 from src.summary_loader import load_trip_summaries
 from src.hotspots import rank_hotspots
 from src.road_usage import (
@@ -60,6 +61,12 @@ DEFAULT_DATA_DIR = (
     "/Users/johnnynijenhuis/Library/CloudStorage/"
     "GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/"
     "Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten"
+)
+DEFAULT_CSV_DIR = (
+    "/Users/johnnynijenhuis/Library/CloudStorage/"
+    "GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/"
+    "Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten/"
+    "Rittendata per maand /Rittendata"
 )
 
 st.set_page_config(
@@ -262,6 +269,15 @@ def _pick_directory_finder(initial: str = "") -> str | None:
     return result.stdout.strip() or None
 
 
+@st.cache_data(show_spinner=False)
+def _detect_schema_cached(path: str, mtime: float) -> tuple[str, str] | None:
+    """Cache schema-detection per file (mtime invalidates cache on file change)."""
+    try:
+        return detect_schema(Path(path))
+    except UnsupportedSchema:
+        return None
+
+
 @st.cache_data(show_spinner="Excel inlezen...")
 def _load_trip_stops(path: str) -> pd.DataFrame:
     return load_trips(Path(path))
@@ -270,6 +286,11 @@ def _load_trip_stops(path: str) -> pd.DataFrame:
 @st.cache_data(show_spinner="Samenvattingsdata inlezen + steden geocoderen...")
 def _load_trip_summaries(path: str) -> pd.DataFrame:
     return load_trip_summaries(Path(path))
+
+
+@st.cache_data(show_spinner="Maand-CSV's inlezen + adressen geocoderen...")
+def _load_csv_monthly(directory: str) -> pd.DataFrame:
+    return load_monthly_csvs(Path(directory))
 
 
 @st.cache_data(show_spinner="Publieke laders ophalen...")
@@ -495,26 +516,44 @@ def main() -> None:
 
         if "data_dir" not in st.session_state:
             st.session_state.data_dir = os.getenv("DATA_DIR", DEFAULT_DATA_DIR)
+        if "csv_dir" not in st.session_state:
+            st.session_state.csv_dir = DEFAULT_CSV_DIR
 
         data_dir = Path(st.session_state.data_dir)
         drive_files = list_excel_files(data_dir) if data_dir.exists() else []
+        csv_dir = Path(st.session_state.csv_dir)
+        has_csvs = csv_dir.exists() and bool(list_monthly_csvs(csv_dir))
 
+        bron_options = []
         if drive_files:
+            bron_options.append("📁 xlsx-map")
+        bron_options.append("📤 xlsx-upload")
+        if has_csvs:
+            bron_options.append("📅 Maand-CSV's")
+
+        if len(bron_options) == 1:
+            mode = bron_options[0]
+            st.caption(f"Bron: {mode}")
+        else:
+            if (
+                "bron_mode" not in st.session_state
+                or st.session_state.bron_mode not in bron_options
+            ):
+                st.session_state.bron_mode = (
+                    "📅 Maand-CSV's" if has_csvs else bron_options[0]
+                )
             mode = st.radio(
                 "Bron",
-                ["📁 Map", "📤 Upload"],
+                bron_options,
+                key="bron_mode",
                 horizontal=True,
                 label_visibility="collapsed",
             )
-        else:
-            mode = "📤 Upload"
-            st.caption(
-                f"Map niet gevonden of leeg ({data_dir}) — gebruik upload."
-            )
 
         excel_path: Path | None = None
+        csv_df: pd.DataFrame | None = None
 
-        if mode == "📁 Map":
+        if mode == "📁 xlsx-map":
             c1, c2 = st.columns([4, 1])
             with c2:
                 st.write("")
@@ -532,15 +571,32 @@ def main() -> None:
                 )
 
             data_dir = Path(st.session_state.data_dir)
-            files = list_excel_files(data_dir)
-            if not files:
+            all_files = list_excel_files(data_dir)
+            if not all_files:
                 st.error(f"Geen .xlsx bestanden gevonden in:\n{data_dir}")
                 st.stop()
 
-            file_names = [f.name for f in files]
+            supported = [
+                f for f in all_files
+                if _detect_schema_cached(str(f), f.stat().st_mtime) is not None
+            ]
+            if not supported:
+                st.error(
+                    f"Geen ondersteund .xlsx-bestand in:\n{data_dir}\n\n"
+                    "Verwacht: TRP BI trip-stop export of Rittendata per wagen."
+                )
+                st.stop()
+            skipped = len(all_files) - len(supported)
+            if skipped:
+                st.caption(
+                    f"ℹ️ {skipped} bestand(en) overgeslagen "
+                    "(geen herkenbare PostNL-export — bv. samenvattingen)."
+                )
+
+            file_names = [f.name for f in supported]
             choice = st.selectbox("Bestand", file_names, index=0)
             excel_path = data_dir / choice
-        else:
+        elif mode == "📤 xlsx-upload":
             uploaded = st.file_uploader(
                 "Excel-bestand (.xlsx)",
                 type=["xlsx"],
@@ -554,26 +610,60 @@ def main() -> None:
                 st.stop()
             excel_path = _persist_upload(uploaded)
             st.caption(f"Geladen: **{uploaded.name}** ({uploaded.size // 1024} KB)")
+        else:  # 📅 Maand-CSV's
+            c1, c2 = st.columns([4, 1])
+            with c2:
+                st.write("")
+                st.write("")
+                if st.button("📂", help="Kies CSV-map in Finder", key="csv_finder"):
+                    picked = _pick_directory_finder(st.session_state.csv_dir)
+                    if picked:
+                        st.session_state.csv_dir = picked
+                        st.rerun()
+            with c1:
+                st.text_input(
+                    "CSV-map",
+                    key="csv_dir",
+                    help="Map met maandelijkse `Rittendata per wagen detail`-CSV's.",
+                )
+            csv_dir = Path(st.session_state.csv_dir)
+            csv_files = list_monthly_csvs(csv_dir)
+            if not csv_files:
+                st.error(f"Geen .csv bestanden gevonden in:\n{csv_dir}")
+                st.stop()
+            st.caption(f"📅 {len(csv_files)} maand-CSV's gevonden in {csv_dir.name}")
 
-    try:
-        schema, sheet = detect_schema(excel_path)
-    except UnsupportedSchema as e:
-        st.error(str(e))
-        st.stop()
-
-    if schema == "trip_stop":
-        df = _load_trip_stops(str(excel_path))
+    if mode == "📅 Maand-CSV's":
+        csv_df = _load_csv_monthly(str(csv_dir))
+        df = csv_df
+        schema = "trip_stop"  # CSV-data heeft dezelfde lat/lon/stop-volgorde als TRP BI
         st.caption(
-            f"📄 Modus: **trip-stop** (TRP BI-export, sheet `{sheet}`). "
-            "Per stop één rij, met GPS-coördinaten en standtijd."
+            f"📄 Modus: **maand-CSV's** (alleen `actiesoort=travel`). "
+            f"{len(df):,}".replace(",", ".")
+            + f" travel-rijen, {df['trip_id'].nunique():,}".replace(",", ".")
+            + f" trips, {df['wagencode'].nunique()} wagens. "
+            "Adressen via Nominatim gegeocodeerd."
         )
     else:
-        df = _load_trip_summaries(str(excel_path))
-        st.caption(
-            f"📄 Modus: **trip-summary** (Rittendata per wagen, sheet `{sheet}`). "
-            "Elke rit = 2 virtuele stops (begin- en eindstad, gegeocodeerd). "
-            "Geen standtijd per stop beschikbaar."
-        )
+        try:
+            schema, sheet = detect_schema(excel_path)
+        except UnsupportedSchema as e:
+            st.error(str(e))
+            st.stop()
+
+        if schema == "trip_stop":
+            df = _load_trip_stops(str(excel_path))
+            st.caption(
+                f"📄 Modus: **trip-stop** (TRP BI-export, sheet `{sheet}`). "
+                "Per stop één rij, met GPS-coördinaten en standtijd."
+            )
+        else:
+            df = _load_trip_summaries(str(excel_path))
+            st.caption(
+                f"📄 Modus: **trip-summary** (Rittendata per wagen, sheet `{sheet}`). "
+                "Elke rit = 2 virtuele stops (begin- en eindstad, gegeocodeerd). "
+                "Geen standtijd per stop beschikbaar."
+            )
 
     with st.sidebar:
         st.header("Filters")
@@ -763,17 +853,53 @@ def main() -> None:
         need_osrm = (show_routes and use_road_routes) or show_road_heatmap
         if need_osrm:
             segs = unique_segments(stops)
-            st.info(
-                f"Ophalen wegroute voor {len(segs)} unieke segmenten "
-                "(gecached voor volgende keer)."
-            )
-            progress = st.progress(0.0)
+            cached_routes, missing_n = load_cached_routes(segs)
+            if missing_n == 0:
+                routes = cached_routes
+            else:
+                eta_min = missing_n * 0.25 / 60
+                if missing_n > 500:
+                    st.warning(
+                        f"⚠️ {missing_n} nieuwe segmenten op te halen "
+                        f"(~{eta_min:.0f} min). Tijdens het ophalen kan de "
+                        "verbinding via Cloudflare time-outen — fetch loopt "
+                        "lokaal door en cachet incrementeel. "
+                        "**Tip:** filter eerst op datum/wagen voor snellere demo."
+                    )
+                    if not st.button(
+                        f"Toch alle {missing_n} segmenten ophalen",
+                        key="confirm_osrm_fetch",
+                    ):
+                        st.info(
+                            "OSRM-routes overgeslagen. Filter eerst, of klik "
+                            "op de knop hierboven om alsnog te starten."
+                        )
+                        routes = cached_routes
+                        need_osrm = False
+                    else:
+                        st.info(
+                            f"Ophalen {missing_n} nieuwe segmenten "
+                            f"(+ {len(segs) - missing_n} uit cache)..."
+                        )
+                        progress = st.progress(0.0)
 
-            def _cb(i: int, total: int) -> None:
-                progress.progress(min(1.0, i / max(total, 1)))
+                        def _cb(i: int, total: int) -> None:
+                            progress.progress(min(1.0, i / max(total, 1)))
 
-            routes = fetch_routes(segs, progress_cb=_cb)
-            progress.empty()
+                        routes = fetch_routes(segs, progress_cb=_cb)
+                        progress.empty()
+                else:
+                    st.info(
+                        f"Ophalen {missing_n} nieuwe segmenten "
+                        f"(+ {len(segs) - missing_n} uit cache, ~{eta_min:.1f} min)..."
+                    )
+                    progress = st.progress(0.0)
+
+                    def _cb(i: int, total: int) -> None:
+                        progress.progress(min(1.0, i / max(total, 1)))
+
+                    routes = fetch_routes(segs, progress_cb=_cb)
+                    progress.empty()
 
         if show_routes and use_road_routes:
             with st.spinner("Wegvlakken wegen en kleuren..."):
