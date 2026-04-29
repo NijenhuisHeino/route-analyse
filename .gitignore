@@ -35,3 +35,6 @@ Thumbs.db
 
 # Conductor workspace context (kept local, not in repo)
 .context/
+
+# Symlink naar Drive-backup (lokale konvenience, niet in repo)
+backups
