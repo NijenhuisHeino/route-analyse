@@ -279,16 +279,13 @@ def _detect_schema_cached(path: str, mtime: float) -> tuple[str, str] | None:
         return None
 
 
-_AGG_EDGES_PARQUET = Path(".cache/agg_weighted_edges_full.parquet")
-_AGG_HEAT_PARQUET = Path(".cache/agg_road_heatmap_full.parquet")
-
-
 @st.cache_data(show_spinner=False)
-def _load_full_weighted_edges() -> list | None:
-    """Laad pre-computed weighted edges uit parquet, of None als niet beschikbaar."""
-    if not _AGG_EDGES_PARQUET.exists():
+def _load_cached_weighted_edges(variant: str) -> list | None:
+    """Laad pre-computed weighted edges per variant ('full', 'eigen', 'charter')."""
+    p = Path(f".cache/agg_weighted_edges_{variant}.parquet")
+    if not p.exists():
         return None
-    edf = pd.read_parquet(_AGG_EDGES_PARQUET)
+    edf = pd.read_parquet(p)
     return [
         ((float(r.lat1), float(r.lon1)), (float(r.lat2), float(r.lon2)), int(r.n_wagens))
         for r in edf.itertuples(index=False)
@@ -296,12 +293,28 @@ def _load_full_weighted_edges() -> list | None:
 
 
 @st.cache_data(show_spinner=False)
-def _load_full_road_heatmap() -> list | None:
-    """Laad pre-computed road heatmap points uit parquet, of None als niet beschikbaar."""
-    if not _AGG_HEAT_PARQUET.exists():
+def _load_cached_road_heatmap(variant: str) -> list | None:
+    """Laad pre-computed road heatmap points per variant."""
+    p = Path(f".cache/agg_road_heatmap_{variant}.parquet")
+    if not p.exists():
         return None
-    hdf = pd.read_parquet(_AGG_HEAT_PARQUET)
+    hdf = pd.read_parquet(p)
     return [(float(r.lat), float(r.lon), float(r.weight)) for r in hdf.itertuples(index=False)]
+
+
+def _detect_cache_variant(stops: pd.DataFrame, df: pd.DataFrame) -> str | None:
+    """Detect which pre-compute variant matches the current filtered stops.
+
+    Returns 'full', 'eigen', 'charter' or None (= must compute live).
+    """
+    if len(stops) == len(df):
+        return "full"
+    types_in_stops = set(stops["vervoerder_type"].unique())
+    if types_in_stops == {"eigen"} and len(stops) == (df["vervoerder_type"] == "eigen").sum():
+        return "eigen"
+    if types_in_stops == {"charter"} and len(stops) == (df["vervoerder_type"] == "charter").sum():
+        return "charter"
+    return None
 
 
 @st.cache_data(show_spinner="Excel inlezen...")
@@ -1042,13 +1055,41 @@ def main() -> None:
         center = [stops["lat"].mean(), stops["lon"].mean()]
         fmap = folium.Map(location=center, zoom_start=8, tiles="OpenStreetMap")
 
+        HEATMAP_AGG_THRESHOLD = 50_000
         if show_heatmap:
-            heat_points = stops[["lat", "lon", "dwell_min"]].values.tolist()
+            if len(stops) > HEATMAP_AGG_THRESHOLD:
+                agg = (
+                    stops.assign(
+                        lat_b=stops["lat"].round(3),
+                        lon_b=stops["lon"].round(3),
+                    )
+                    .groupby(["lat_b", "lon_b"], sort=False)
+                    .agg(weight=("dwell_min", lambda s: max(s.sum(), 1)))
+                    .reset_index()
+                )
+                heat_points = agg[["lat_b", "lon_b", "weight"]].values.tolist()
+                st.caption(
+                    f"⚡ Heatmap geaggregeerd: {len(agg):,} cellen "
+                    f"(uit {len(stops):,} stops, ~110 m grid)."
+                    .replace(",", ".")
+                )
+            else:
+                heat_points = stops[["lat", "lon", "dwell_min"]].values.tolist()
             HeatMap(heat_points, radius=14, blur=20, min_opacity=0.3).add_to(fmap)
 
+        MARKER_CAP = 20_000
         if show_markers:
+            if len(stops) > MARKER_CAP:
+                stops_markers = stops.nlargest(MARKER_CAP, "dwell_min", keep="first")
+                st.caption(
+                    f"⚡ Stop-markers gecapped op top-{MARKER_CAP:,} (sortering: standtijd) "
+                    f"uit {len(stops):,} stops."
+                    .replace(",", ".")
+                )
+            else:
+                stops_markers = stops
             cluster = MarkerCluster().add_to(fmap)
-            for _, row in stops.iterrows():
+            for _, row in stops_markers.iterrows():
                 popup = folium.Popup(
                     html=(
                         f"<b>{row['locatie_naam'] or '(onbekend)'}</b><br>"
@@ -1121,15 +1162,16 @@ def main() -> None:
                     routes = fetch_routes(segs, progress_cb=_cb)
                     progress.empty()
 
-        is_full_dataset = len(stops) == len(df)
+        cache_variant = _detect_cache_variant(stops, df)
 
         if show_routes and use_road_routes:
             edges = None
-            if is_full_dataset:
-                edges = _load_full_weighted_edges()
+            if cache_variant:
+                edges = _load_cached_weighted_edges(cache_variant)
                 if edges:
                     st.caption(
-                        f"⚡ {len(edges):,} wegvlakken geladen uit pre-compute cache."
+                        f"⚡ {len(edges):,} wegvlakken geladen uit pre-compute cache "
+                        f"(variant: {cache_variant})."
                         .replace(",", ".")
                     )
             if edges is None:
@@ -1184,11 +1226,12 @@ def main() -> None:
         road_heat_points: list[tuple[float, float, float]] = []
         if show_road_heatmap:
             all_points = None
-            if is_full_dataset:
-                all_points = _load_full_road_heatmap()
+            if cache_variant:
+                all_points = _load_cached_road_heatmap(cache_variant)
                 if all_points:
                     st.caption(
-                        f"⚡ {len(all_points):,} wegvlak-cellen geladen uit pre-compute cache."
+                        f"⚡ {len(all_points):,} wegvlak-cellen geladen uit pre-compute cache "
+                        f"(variant: {cache_variant})."
                         .replace(",", ".")
                     )
             if all_points is None:

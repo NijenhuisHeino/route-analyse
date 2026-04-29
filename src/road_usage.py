@@ -26,6 +26,37 @@ def _haversine_km(p1: tuple[float, float], p2: tuple[float, float]) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+def _segment_wagen_sets(
+    stops: pd.DataFrame, round_decimals: int = 5
+) -> dict[tuple, set[str]]:
+    """Vectoriseerde aggregatie: per uniek wegvlak (segment-key) -> set wagencodes.
+
+    Veel sneller dan per-trip iteratie: 1 pandas groupby in plaats van 272k loops.
+    """
+    df = stops.sort_values(
+        ["wagencode", "trip_date", "trip_id", "stop_seq"], kind="stable"
+    ).reset_index(drop=True)
+
+    grp = df.groupby(["wagencode", "trip_date", "trip_id"], sort=False)
+    df["next_lat"] = grp["lat"].shift(-1)
+    df["next_lon"] = grp["lon"].shift(-1)
+    pairs = df.dropna(subset=["next_lat", "next_lon"])
+
+    pairs = pairs.assign(
+        lat1=pairs["lat"].round(round_decimals),
+        lon1=pairs["lon"].round(round_decimals),
+        lat2=pairs["next_lat"].round(round_decimals),
+        lon2=pairs["next_lon"].round(round_decimals),
+    )
+
+    seg_wagens: dict[tuple, set[str]] = {}
+    for (lat1, lon1, lat2, lon2), g in pairs.groupby(
+        ["lat1", "lon1", "lat2", "lon2"], sort=False
+    ):
+        seg_wagens[(lat1, lon1, lat2, lon2)] = set(g["wagencode"].astype(str).unique())
+    return seg_wagens
+
+
 def compute_road_heatmap_points(
     stops: pd.DataFrame,
     routes: dict,
@@ -33,26 +64,25 @@ def compute_road_heatmap_points(
 ) -> list[tuple[float, float, float]]:
     """Return [(lat, lon, n_unique_wagens)] aggregated across all trips.
 
-    round_decimals=3 ≈ 110 m grid (good for regional overview).
-    round_decimals=4 ≈ 11 m grid (finer, heavier to render).
+    Vectoriseerd: aggregeert eerst per uniek segment (46k), dan polyline-walk.
+    round_decimals=3 ≈ 110 m grid.
     """
-    cell_wagens: dict[tuple[float, float], set[str]] = {}
+    seg_wagens = _segment_wagen_sets(stops)
 
-    for (wagen, _date, _trip), g in stops.groupby(
-        ["wagencode", "trip_date", "trip_id"]
-    ):
-        if len(g) < 2:
-            continue
-        poly = trip_polyline(g, routes)
-        seen_cells: set[tuple[float, float]] = set()
+    cell_wagens: dict[tuple[float, float], set[str]] = {}
+    for seg_key, wagens in seg_wagens.items():
+        poly = routes.get(seg_key)
+        if not poly:
+            poly = [(seg_key[0], seg_key[1]), (seg_key[2], seg_key[3])]
+        seen: set[tuple[float, float]] = set()
         for lat, lon in poly:
             cell = (round(lat, round_decimals), round(lon, round_decimals))
-            if cell in seen_cells:
+            if cell in seen:
                 continue
-            seen_cells.add(cell)
-            cell_wagens.setdefault(cell, set()).add(str(wagen))
+            seen.add(cell)
+            cell_wagens.setdefault(cell, set()).update(wagens)
 
-    return [(lat, lon, float(len(wagens))) for (lat, lon), wagens in cell_wagens.items()]
+    return [(lat, lon, float(len(w))) for (lat, lon), w in cell_wagens.items()]
 
 
 def top_road_hotspots(
@@ -72,19 +102,16 @@ def compute_weighted_edges(
 ) -> list[tuple[tuple[float, float], tuple[float, float], int]]:
     """Per consecutief paar punten op alle OSRM trip-polylines: tel unieke wagens.
 
-    Retourneert [(p1, p2, n_unique_wagens), ...]. Richting blijft behouden
-    — heen en terug over hetzelfde wegvlak worden apart geteld (twee lijnen).
-    Werkt op OSRM `overview=full` output waar alle trips dezelfde road-graph
-    vertices delen, zodat er per wegvlak exact één lijn overblijft.
+    Retourneert [(p1, p2, n_unique_wagens), ...]. Richting blijft behouden.
+    Vectoriseerd: aggregeert eerst per uniek segment (46k), dan polyline-walk.
     """
-    edge_wagens: dict[tuple, set[str]] = {}
+    seg_wagens = _segment_wagen_sets(stops)
 
-    for (wagen, _date, _trip), g in stops.groupby(
-        ["wagencode", "trip_date", "trip_id"]
-    ):
-        if len(g) < 2:
-            continue
-        poly = trip_polyline(g, routes)
+    edge_wagens: dict[tuple, set[str]] = {}
+    for seg_key, wagens in seg_wagens.items():
+        poly = routes.get(seg_key)
+        if not poly:
+            poly = [(seg_key[0], seg_key[1]), (seg_key[2], seg_key[3])]
         for i in range(len(poly) - 1):
             p1 = (round(poly[i][0], round_decimals), round(poly[i][1], round_decimals))
             p2 = (
@@ -93,10 +120,9 @@ def compute_weighted_edges(
             )
             if p1 == p2:
                 continue
-            key = (p1, p2)
-            edge_wagens.setdefault(key, set()).add(str(wagen))
+            edge_wagens.setdefault((p1, p2), set()).update(wagens)
 
-    return [(p1, p2, len(wagens)) for (p1, p2), wagens in edge_wagens.items()]
+    return [(p1, p2, len(w)) for (p1, p2), w in edge_wagens.items()]
 
 
 def compute_corridors(
