@@ -15,12 +15,8 @@ from dotenv import load_dotenv
 from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 
-from src.chargers import (
-    DEFAULT_MIN_POWER_KW,
-    OCMKeyMissing,
-    add_nearest_charger_distance,
-    fetch_chargers,
-)
+from src.chargers import add_nearest_charger_distance
+from src.hdv_chargers import load_hdv_chargers
 from src.data_loader import (
     UnsupportedSchema,
     detect_schema,
@@ -332,9 +328,9 @@ def _load_csv_monthly(directory: str) -> pd.DataFrame:
     return load_monthly_csvs(Path(directory))
 
 
-@st.cache_data(show_spinner="Publieke laders ophalen...")
+@st.cache_data(show_spinner="Geverifieerde HDV-laadlocaties laden...")
 def _load_chargers(min_power_kw: float) -> pd.DataFrame:
-    return fetch_chargers(min_power_kw=min_power_kw)
+    return load_hdv_chargers(min_power_kw=min_power_kw)
 
 
 def _persist_upload(uploaded_file) -> Path:
@@ -933,19 +929,23 @@ def main() -> None:
         )
 
         has_dwell = df["dwell_min"].fillna(0).gt(0).any()
-        min_dwell = st.slider(
-            "Minimale standtijd (min)",
-            min_value=0,
-            max_value=180,
-            value=30 if has_dwell else 0,
-            step=5,
-            disabled=not has_dwell,
-            help=(
-                "Stops korter dan dit worden genegeerd (laden is dan onrealistisch)."
-                if has_dwell
-                else "Niet beschikbaar in trip-summary modus."
-            ),
-        )
+        if mode == "📅 Maand-CSV's":
+            min_dwell = 0
+        else:
+            min_dwell = st.slider(
+                "Minimale standtijd (min)",
+                min_value=0,
+                max_value=180,
+                value=0,
+                step=5,
+                disabled=not has_dwell,
+                help=(
+                    "Stops korter dan dit worden genegeerd "
+                    "(laden is dan onrealistisch)."
+                    if has_dwell
+                    else "Niet beschikbaar in trip-summary modus."
+                ),
+            )
 
         wagencodes_all = sorted(df["wagencode"].dropna().astype(str).unique().tolist())
         sel_wagens = st.multiselect(
@@ -990,13 +990,32 @@ def main() -> None:
                 "drempel) naar donkerpaars (drukst bereden)."
             ),
         )
-        show_chargers = st.checkbox("Publieke laders (OCM)", value=False)
+        show_chargers = st.checkbox(
+            "Geverifieerde HDV-laadlocaties",
+            value=False,
+            help=(
+                "Handmatig geverifieerde laadlocaties die toegankelijk zijn "
+                "voor vrachtwagens (244 locaties)."
+            ),
+        )
         charger_min_kw = st.slider(
             "Min. laadvermogen (kW)",
-            min_value=50,
+            min_value=0,
             max_value=400,
-            value=int(DEFAULT_MIN_POWER_KW),
+            value=150,
             step=50,
+            disabled=not show_chargers,
+        )
+        charger_only_dedicated = st.checkbox(
+            "Alleen dedicated voor HDV",
+            value=False,
+            disabled=not show_chargers,
+            help="Alleen locaties die exclusief voor vrachtwagens zijn ingericht.",
+        )
+        charger_access = st.multiselect(
+            "Toegankelijkheid",
+            ["Publiek", "Semi-publiek", "Privaat"],
+            default=["Publiek", "Semi-publiek"],
             disabled=not show_chargers,
         )
 
@@ -1035,19 +1054,27 @@ def main() -> None:
     if show_chargers:
         try:
             chargers_df = _load_chargers(charger_min_kw)
-        except OCMKeyMissing as e:
+            if charger_only_dedicated:
+                chargers_df = chargers_df[
+                    chargers_df["dedicated"].astype("string").str.strip() == "Ja"
+                ]
+            if charger_access:
+                chargers_df = chargers_df[
+                    chargers_df["toegankelijkheid"].isin(charger_access)
+                ]
+        except FileNotFoundError as e:
             charger_error = str(e)
         except Exception as e:
-            charger_error = f"Ophalen laders mislukt: {e}"
+            charger_error = f"Laden van HDV-laadlocaties mislukt: {e}"
 
         with st.sidebar:
             if charger_error:
-                st.error(f"⚠️ Publieke laders niet geladen.\n\n{charger_error}")
+                st.error(f"⚠️ HDV-laadlocaties niet geladen.\n\n{charger_error}")
             elif chargers_df.empty:
-                st.info(f"Geen laders ≥ {charger_min_kw} kW gevonden in NL.")
+                st.info("Geen laders die aan filters voldoen.")
             else:
                 st.success(
-                    f"✅ {len(chargers_df)} laders ≥ {charger_min_kw} kW geladen "
+                    f"✅ {len(chargers_df)} HDV-laadlocaties geladen "
                     "(🟢 groene bliksem-markers op de kaart)."
                 )
 
@@ -1255,26 +1282,34 @@ def main() -> None:
 
         if show_chargers and not chargers_df.empty:
             for _, c in chargers_df.iterrows():
+                dedicated = (c.get("dedicated") or "").strip()
+                t247 = (c.get("twentyfour_seven") or "").strip()
+                acces = (c.get("toegankelijkheid") or "").strip()
+                ccs = (c.get("ccs_mcs") or "").strip()
                 popup = folium.Popup(
                     html=(
                         f"<b>{c['name'] or '(naamloos)'}</b><br>"
-                        f"{c['operator'] or ''}<br>"
                         f"{c['address']}, {c['postcode']} {c['town']}<br>"
-                        f"Max vermogen: {int(c['max_power_kw'])} kW<br>"
-                        f"Connectoren: {int(c['n_connectors'])}"
+                        f"⚡ Max {int(c['max_power_kw'])} kW · {int(c['n_connectors'])} laadpalen<br>"
+                        f"🔌 {ccs or 'onbekend'}<br>"
+                        f"🚪 {acces or 'onbekend'}"
+                        + (f" · 24/7" if t247 == "Ja" else "")
+                        + (f" · 🚛 dedicated HDV" if dedicated == "Ja" else "")
                     ),
-                    max_width=280,
+                    max_width=300,
                 )
                 folium.Marker(
                     location=[c["lat"], c["lon"]],
                     icon=folium.Icon(color="green", icon="bolt", prefix="fa"),
-                    tooltip=f"⚡ {c['name'] or 'lader'} — {int(c['max_power_kw'])} kW",
+                    tooltip=(
+                        f"⚡ {c['name'] or 'lader'} — {int(c['max_power_kw'])} kW"
+                        + (" · HDV" if dedicated == "Ja" else "")
+                    ),
                     popup=popup,
                 ).add_to(fmap)
             st.caption(
-                f"🟢 Groene bliksem-markers = {len(chargers_df)} publieke laders "
-                f"≥ {charger_min_kw} kW (bron: Open Charge Map). "
-                "Klik op een marker voor details."
+                f"🟢 Groene bliksem-markers = {len(chargers_df)} geverifieerde "
+                f"HDV-laadlocaties ≥ {charger_min_kw} kW. Klik op een marker voor details."
             )
         st_folium(fmap, height=620, use_container_width=True, returned_objects=[])
 
