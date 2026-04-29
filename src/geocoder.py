@@ -10,15 +10,16 @@ from geopy.geocoders import Nominatim
 
 CACHE_DIR = Path(".cache")
 CACHE_PATH = CACHE_DIR / "geocode_cities.parquet"
+ADDR_CACHE_PATH = CACHE_DIR / "geocode_addresses.parquet"
 REVERSE_CACHE_PATH = CACHE_DIR / "reverse_geocode.parquet"
 USER_AGENT = "postnl-route-analyse/0.1 (johnny@nijenhuistrucksolutions.nl)"
 REVERSE_ROUND = 4  # ~11 m grid: cache hits voor dichtbijgelegen punten
 
 
-def _load_cache() -> dict[str, tuple[float, float] | None]:
-    if not CACHE_PATH.exists():
+def _load_cache_at(path: Path) -> dict[str, tuple[float, float] | None]:
+    if not path.exists():
         return {}
-    df = pd.read_parquet(CACHE_PATH)
+    df = pd.read_parquet(path)
     out: dict[str, tuple[float, float] | None] = {}
     for _, row in df.iterrows():
         lat, lon = row["lat"], row["lon"]
@@ -29,7 +30,9 @@ def _load_cache() -> dict[str, tuple[float, float] | None]:
     return out
 
 
-def _save_cache(cache: dict[str, tuple[float, float] | None]) -> None:
+def _save_cache_at(
+    path: Path, cache: dict[str, tuple[float, float] | None]
+) -> None:
     CACHE_DIR.mkdir(exist_ok=True)
     rows = []
     for q, val in cache.items():
@@ -37,7 +40,34 @@ def _save_cache(cache: dict[str, tuple[float, float] | None]) -> None:
             rows.append({"query": q, "lat": None, "lon": None})
         else:
             rows.append({"query": q, "lat": val[0], "lon": val[1]})
-    pd.DataFrame(rows).to_parquet(CACHE_PATH, index=False)
+    pd.DataFrame(rows).to_parquet(path, index=False)
+
+
+def _geocode_with_cache(
+    queries: list[str],
+    cache_path: Path,
+    country_code: str = "nl",
+    progress_cb=None,
+) -> dict[str, tuple[float, float] | None]:
+    cache = _load_cache_at(cache_path)
+    missing = sorted({q for q in queries if q and q not in cache})
+
+    if missing:
+        geolocator = Nominatim(user_agent=USER_AGENT)
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1.1)
+
+        for i, q in enumerate(missing, start=1):
+            try:
+                loc = geocode(q, country_codes=country_code, exactly_one=True, timeout=15)
+                cache[q] = (loc.latitude, loc.longitude) if loc else None
+            except Exception:
+                cache[q] = None
+            if progress_cb:
+                progress_cb(i, len(missing))
+
+        _save_cache_at(cache_path, cache)
+
+    return {q: cache.get(q) for q in queries}
 
 
 def geocode_queries(
@@ -45,32 +75,20 @@ def geocode_queries(
     country_code: str = "nl",
     progress_cb=None,
 ) -> dict[str, tuple[float, float] | None]:
-    """Geocode a list of strings to (lat, lon) tuples, using disk cache.
+    """Geocode a list of city/place strings to (lat, lon) tuples, using disk cache.
 
     Nominatim's usage policy requires a descriptive user agent and <=1 request/s.
     """
-    cache = _load_cache()
-    missing = sorted({q for q in queries if q and q not in cache})
+    return _geocode_with_cache(queries, CACHE_PATH, country_code, progress_cb)
 
-    if missing:
-        geolocator = Nominatim(user_agent="postnl-route-analyse/0.1 (johnny@nijenhuistrucksolutions.nl)")
-        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1.1)
 
-        for i, q in enumerate(missing, start=1):
-            try:
-                loc = geocode(q, country_codes=country_code, exactly_one=True, timeout=15)
-                if loc:
-                    cache[q] = (loc.latitude, loc.longitude)
-                else:
-                    cache[q] = None
-            except Exception:
-                cache[q] = None
-            if progress_cb:
-                progress_cb(i, len(missing))
-
-        _save_cache(cache)
-
-    return {q: cache.get(q) for q in queries}
+def geocode_addresses(
+    queries: list[str],
+    country_code: str = "nl",
+    progress_cb=None,
+) -> dict[str, tuple[float, float] | None]:
+    """Geocode full street addresses (`street nr, postcode city`), separate cache."""
+    return _geocode_with_cache(queries, ADDR_CACHE_PATH, country_code, progress_cb)
 
 
 def _key(lat: float, lon: float) -> tuple[float, float]:

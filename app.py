@@ -15,12 +15,8 @@ from dotenv import load_dotenv
 from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 
-from src.chargers import (
-    DEFAULT_MIN_POWER_KW,
-    OCMKeyMissing,
-    add_nearest_charger_distance,
-    fetch_chargers,
-)
+from src.chargers import add_nearest_charger_distance
+from src.hdv_chargers import load_hdv_chargers
 from src.data_loader import (
     UnsupportedSchema,
     detect_schema,
@@ -29,6 +25,8 @@ from src.data_loader import (
     load_trips,
 )
 from src.geocoder import reverse_geocode
+from src.csv_loader import list_monthly_csvs, load_monthly_csvs
+from src.simulation import charge_hotspots, simulate_soc
 from src.summary_loader import load_trip_summaries
 from src.hotspots import rank_hotspots
 from src.road_usage import (
@@ -60,6 +58,12 @@ DEFAULT_DATA_DIR = (
     "/Users/johnnynijenhuis/Library/CloudStorage/"
     "GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/"
     "Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten"
+)
+DEFAULT_CSV_DIR = (
+    "/Users/johnnynijenhuis/Library/CloudStorage/"
+    "GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/"
+    "Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten/"
+    "Rittendata per maand /Rittendata"
 )
 
 st.set_page_config(
@@ -262,6 +266,49 @@ def _pick_directory_finder(initial: str = "") -> str | None:
     return result.stdout.strip() or None
 
 
+@st.cache_data(show_spinner=False)
+def _detect_schema_cached(path: str, mtime: float) -> tuple[str, str] | None:
+    """Cache schema-detection per file (mtime invalidates cache on file change)."""
+    try:
+        return detect_schema(Path(path))
+    except UnsupportedSchema:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def _load_cached_weighted_edges_df(variant: str) -> pd.DataFrame | None:
+    """Laad pre-computed weighted edges per variant als DataFrame."""
+    p = Path(f".cache/agg_weighted_edges_{variant}.parquet")
+    if not p.exists():
+        return None
+    return pd.read_parquet(p)
+
+
+@st.cache_data(show_spinner=False)
+def _load_cached_road_heatmap(variant: str) -> list | None:
+    """Laad pre-computed road heatmap points per variant."""
+    p = Path(f".cache/agg_road_heatmap_{variant}.parquet")
+    if not p.exists():
+        return None
+    hdf = pd.read_parquet(p)
+    return [(float(r.lat), float(r.lon), float(r.weight)) for r in hdf.itertuples(index=False)]
+
+
+def _detect_cache_variant(stops: pd.DataFrame, df: pd.DataFrame) -> str | None:
+    """Detect which pre-compute variant matches the current filtered stops.
+
+    Returns 'full', 'eigen', 'charter' or None (= must compute live).
+    """
+    if len(stops) == len(df):
+        return "full"
+    types_in_stops = set(stops["vervoerder_type"].unique())
+    if types_in_stops == {"eigen"} and len(stops) == (df["vervoerder_type"] == "eigen").sum():
+        return "eigen"
+    if types_in_stops == {"charter"} and len(stops) == (df["vervoerder_type"] == "charter").sum():
+        return "charter"
+    return None
+
+
 @st.cache_data(show_spinner="Excel inlezen...")
 def _load_trip_stops(path: str) -> pd.DataFrame:
     return load_trips(Path(path))
@@ -272,9 +319,14 @@ def _load_trip_summaries(path: str) -> pd.DataFrame:
     return load_trip_summaries(Path(path))
 
 
-@st.cache_data(show_spinner="Publieke laders ophalen...")
+@st.cache_data(show_spinner="Maand-CSV's inlezen + adressen geocoderen...")
+def _load_csv_monthly(directory: str) -> pd.DataFrame:
+    return load_monthly_csvs(Path(directory))
+
+
+@st.cache_data(show_spinner="Geverifieerde HDV-laadlocaties laden...")
 def _load_chargers(min_power_kw: float) -> pd.DataFrame:
-    return fetch_chargers(min_power_kw=min_power_kw)
+    return load_hdv_chargers(min_power_kw=min_power_kw)
 
 
 def _persist_upload(uploaded_file) -> Path:
@@ -285,6 +337,167 @@ def _persist_upload(uploaded_file) -> Path:
     if not dst.exists():
         dst.write_bytes(data)
     return dst
+
+
+def _render_simulation(stops: pd.DataFrame) -> None:
+    """Verbruiks-/SoC-simulatie tab: parameters, resultaten, charge-hotspots."""
+    st.subheader("eTruck verbruiks- en laadsimulatie")
+    st.caption(
+        "Indicatieve simulatie: per trip wordt SoC berekend op basis van "
+        "haversine-afstand × verbruik. Waar de SoC onder de drempel komt, "
+        "wordt een laad-event geplaatst. Aggregeert tot kandidaat-laadlocaties."
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        kwh_per_km = st.number_input(
+            "Verbruik (kWh/km)",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.2,
+            step=0.1,
+            help="Typisch voor zware eTruck: 1.0-1.6 kWh/km afhankelijk van belading.",
+        )
+        capacity = st.number_input(
+            "Batterij netto (kWh)",
+            min_value=100,
+            max_value=1500,
+            value=590,
+            step=10,
+            help="Bruikbare capaciteit (na buffers van fabrikant).",
+        )
+    with c2:
+        start_soc = st.slider(
+            "Start SoC (%)", min_value=50, max_value=100, value=100, step=5
+        )
+        soc_threshold = st.slider(
+            "Min. SoC drempel (%)",
+            min_value=5,
+            max_value=30,
+            value=15,
+            step=1,
+            help="Onder deze drempel triggert een laad-event.",
+        )
+    with c3:
+        max_kw = st.number_input(
+            "Max laadvermogen (kW)",
+            min_value=50,
+            max_value=1000,
+            value=350,
+            step=50,
+            help="Bepaalt laadtijd: kWh ÷ kW × 60 = minuten.",
+        )
+        st.write("")
+        st.write("")
+        st.caption("Aanname: bij laden wordt opgeladen tot 100%.")
+
+    if stops.empty:
+        st.info("Geen stops om te simuleren — pas filters aan.")
+        return
+
+    with st.spinner("SoC-traject berekenen..."):
+        sim = simulate_soc(
+            stops,
+            kwh_per_km=kwh_per_km,
+            capacity_kwh=capacity,
+            start_soc_pct=start_soc,
+            threshold_pct=soc_threshold,
+            max_charge_kw=max_kw,
+        )
+
+    n_events = int(sim["charge_event"].sum())
+    n_trips = sim["trip_id"].nunique()
+    n_trips_charging = sim.loc[sim["charge_event"], "trip_id"].nunique()
+    total_kwh = float(sim["charge_kwh"].sum())
+    total_min = float(sim["charge_min"].sum())
+
+    st.divider()
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Trips", f"{n_trips:,}".replace(",", "."))
+    k2.metric(
+        "Trips met laad-event",
+        f"{n_trips_charging:,}".replace(",", "."),
+        f"{(100 * n_trips_charging / max(n_trips, 1)):.0f}% van totaal",
+    )
+    k3.metric("Laad-events totaal", f"{n_events:,}".replace(",", "."))
+    k4.metric(
+        "Geschatte laadtijd totaal",
+        f"{total_min / 60:,.0f} uur".replace(",", "."),
+        f"{total_kwh:,.0f} kWh".replace(",", "."),
+    )
+
+    st.divider()
+
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        st.subheader("Top-50 kandidaat-laadlocaties")
+        st.caption(
+            "Locaties waar trucks volgens deze simulatie het vaakst zouden moeten laden."
+        )
+        hotspots = charge_hotspots(sim, top_n=50)
+        if hotspots.empty:
+            st.info("Geen laad-events bij deze parameters.")
+        else:
+            hotspots_view = hotspots.copy()
+            hotspots_view["maps"] = hotspots_view.apply(
+                lambda r: f"https://www.google.com/maps?q={r['lat']},{r['lon']}",
+                axis=1,
+            )
+            st.dataframe(
+                hotspots_view[
+                    [
+                        "adres",
+                        "n_events",
+                        "n_unieke_wagens",
+                        "totaal_kwh",
+                        "gem_min",
+                        "maps",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "maps": st.column_config.LinkColumn(
+                        "Kaart", display_text="📍 Open"
+                    ),
+                },
+            )
+            st.download_button(
+                "Download kandidaat-laadlocaties als CSV",
+                data=hotspots.to_csv(index=False).encode("utf-8"),
+                file_name="kandidaat_laadlocaties.csv",
+                mime="text/csv",
+                key="dl_charge_hotspots",
+            )
+
+    with col_right:
+        st.subheader("Per-trip overzicht")
+        per_trip = (
+            sim.groupby("trip_id")
+            .agg(
+                stops=("stop_seq", "size"),
+                trip_km=("segment_km", "sum"),
+                eind_soc_pct=("soc_pct_aankomst", "last"),
+                laad_events=("charge_event", "sum"),
+                laad_kwh=("charge_kwh", "sum"),
+                laad_min=("charge_min", "sum"),
+            )
+            .reset_index()
+        )
+        per_trip["trip_km"] = per_trip["trip_km"].round(1)
+        per_trip["laad_kwh"] = per_trip["laad_kwh"].round(0)
+        per_trip["laad_min"] = per_trip["laad_min"].round(0)
+        per_trip = per_trip.sort_values("laad_events", ascending=False).head(100)
+        st.dataframe(
+            per_trip,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            f"Top 100 trips gerangschikt op aantal laad-events. "
+            f"Totaal {n_trips:,} trips gesimuleerd.".replace(",", ".")
+        )
 
 
 def _render_dashboard(
@@ -486,7 +699,38 @@ def _render_dashboard(
             st.caption("Geen vervoerder-data beschikbaar.")
 
 
+def _auto_restore_cache() -> None:
+    """Als kritieke cache-bestanden ontbreken maar in Drive-backup staan, herstel."""
+    import shutil
+
+    local = Path(".cache")
+    drive = Path(
+        "/Users/johnnynijenhuis/Library/CloudStorage/"
+        "GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/"
+        "Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/"
+        "Data analyse ritten/Route analyse tool/cache-backup"
+    )
+    if not drive.exists():
+        return
+    local.mkdir(exist_ok=True)
+    restored = 0
+    for src in drive.glob("*.parquet"):
+        dst = local / src.name
+        if not dst.exists():
+            try:
+                shutil.copy2(src, dst)
+                restored += 1
+            except Exception:
+                pass
+    if restored:
+        st.toast(
+            f"☁️ Cache hersteld: {restored} bestand(en) van Drive-backup.",
+            icon="✅",
+        )
+
+
 def main() -> None:
+    _auto_restore_cache()
     st.markdown(ETA_CSS, unsafe_allow_html=True)
     st.markdown(ETA_HERO, unsafe_allow_html=True)
 
@@ -495,26 +739,44 @@ def main() -> None:
 
         if "data_dir" not in st.session_state:
             st.session_state.data_dir = os.getenv("DATA_DIR", DEFAULT_DATA_DIR)
+        if "csv_dir" not in st.session_state:
+            st.session_state.csv_dir = DEFAULT_CSV_DIR
 
         data_dir = Path(st.session_state.data_dir)
         drive_files = list_excel_files(data_dir) if data_dir.exists() else []
+        csv_dir = Path(st.session_state.csv_dir)
+        has_csvs = csv_dir.exists() and bool(list_monthly_csvs(csv_dir))
 
+        bron_options = []
         if drive_files:
+            bron_options.append("📁 xlsx-map")
+        bron_options.append("📤 xlsx-upload")
+        if has_csvs:
+            bron_options.append("📅 Maand-CSV's")
+
+        if len(bron_options) == 1:
+            mode = bron_options[0]
+            st.caption(f"Bron: {mode}")
+        else:
+            if (
+                "bron_mode" not in st.session_state
+                or st.session_state.bron_mode not in bron_options
+            ):
+                st.session_state.bron_mode = (
+                    "📅 Maand-CSV's" if has_csvs else bron_options[0]
+                )
             mode = st.radio(
                 "Bron",
-                ["📁 Map", "📤 Upload"],
+                bron_options,
+                key="bron_mode",
                 horizontal=True,
                 label_visibility="collapsed",
             )
-        else:
-            mode = "📤 Upload"
-            st.caption(
-                f"Map niet gevonden of leeg ({data_dir}) — gebruik upload."
-            )
 
         excel_path: Path | None = None
+        csv_df: pd.DataFrame | None = None
 
-        if mode == "📁 Map":
+        if mode == "📁 xlsx-map":
             c1, c2 = st.columns([4, 1])
             with c2:
                 st.write("")
@@ -532,15 +794,32 @@ def main() -> None:
                 )
 
             data_dir = Path(st.session_state.data_dir)
-            files = list_excel_files(data_dir)
-            if not files:
+            all_files = list_excel_files(data_dir)
+            if not all_files:
                 st.error(f"Geen .xlsx bestanden gevonden in:\n{data_dir}")
                 st.stop()
 
-            file_names = [f.name for f in files]
+            supported = [
+                f for f in all_files
+                if _detect_schema_cached(str(f), f.stat().st_mtime) is not None
+            ]
+            if not supported:
+                st.error(
+                    f"Geen ondersteund .xlsx-bestand in:\n{data_dir}\n\n"
+                    "Verwacht: TRP BI trip-stop export of Rittendata per wagen."
+                )
+                st.stop()
+            skipped = len(all_files) - len(supported)
+            if skipped:
+                st.caption(
+                    f"ℹ️ {skipped} bestand(en) overgeslagen "
+                    "(geen herkenbare PostNL-export — bv. samenvattingen)."
+                )
+
+            file_names = [f.name for f in supported]
             choice = st.selectbox("Bestand", file_names, index=0)
             excel_path = data_dir / choice
-        else:
+        elif mode == "📤 xlsx-upload":
             uploaded = st.file_uploader(
                 "Excel-bestand (.xlsx)",
                 type=["xlsx"],
@@ -554,26 +833,60 @@ def main() -> None:
                 st.stop()
             excel_path = _persist_upload(uploaded)
             st.caption(f"Geladen: **{uploaded.name}** ({uploaded.size // 1024} KB)")
+        else:  # 📅 Maand-CSV's
+            c1, c2 = st.columns([4, 1])
+            with c2:
+                st.write("")
+                st.write("")
+                if st.button("📂", help="Kies CSV-map in Finder", key="csv_finder"):
+                    picked = _pick_directory_finder(st.session_state.csv_dir)
+                    if picked:
+                        st.session_state.csv_dir = picked
+                        st.rerun()
+            with c1:
+                st.text_input(
+                    "CSV-map",
+                    key="csv_dir",
+                    help="Map met maandelijkse `Rittendata per wagen detail`-CSV's.",
+                )
+            csv_dir = Path(st.session_state.csv_dir)
+            csv_files = list_monthly_csvs(csv_dir)
+            if not csv_files:
+                st.error(f"Geen .csv bestanden gevonden in:\n{csv_dir}")
+                st.stop()
+            st.caption(f"📅 {len(csv_files)} maand-CSV's gevonden in {csv_dir.name}")
 
-    try:
-        schema, sheet = detect_schema(excel_path)
-    except UnsupportedSchema as e:
-        st.error(str(e))
-        st.stop()
-
-    if schema == "trip_stop":
-        df = _load_trip_stops(str(excel_path))
+    if mode == "📅 Maand-CSV's":
+        csv_df = _load_csv_monthly(str(csv_dir))
+        df = csv_df
+        schema = "trip_stop"  # CSV-data heeft dezelfde lat/lon/stop-volgorde als TRP BI
         st.caption(
-            f"📄 Modus: **trip-stop** (TRP BI-export, sheet `{sheet}`). "
-            "Per stop één rij, met GPS-coördinaten en standtijd."
+            f"📄 Modus: **maand-CSV's** (alleen `actiesoort=travel`). "
+            f"{len(df):,}".replace(",", ".")
+            + f" travel-rijen, {df['trip_id'].nunique():,}".replace(",", ".")
+            + f" trips, {df['wagencode'].nunique()} wagens. "
+            "Adressen via Nominatim gegeocodeerd."
         )
     else:
-        df = _load_trip_summaries(str(excel_path))
-        st.caption(
-            f"📄 Modus: **trip-summary** (Rittendata per wagen, sheet `{sheet}`). "
-            "Elke rit = 2 virtuele stops (begin- en eindstad, gegeocodeerd). "
-            "Geen standtijd per stop beschikbaar."
-        )
+        try:
+            schema, sheet = detect_schema(excel_path)
+        except UnsupportedSchema as e:
+            st.error(str(e))
+            st.stop()
+
+        if schema == "trip_stop":
+            df = _load_trip_stops(str(excel_path))
+            st.caption(
+                f"📄 Modus: **trip-stop** (TRP BI-export, sheet `{sheet}`). "
+                "Per stop één rij, met GPS-coördinaten en standtijd."
+            )
+        else:
+            df = _load_trip_summaries(str(excel_path))
+            st.caption(
+                f"📄 Modus: **trip-summary** (Rittendata per wagen, sheet `{sheet}`). "
+                "Elke rit = 2 virtuele stops (begin- en eindstad, gegeocodeerd). "
+                "Geen standtijd per stop beschikbaar."
+            )
 
     with st.sidebar:
         st.header("Filters")
@@ -612,19 +925,23 @@ def main() -> None:
         )
 
         has_dwell = df["dwell_min"].fillna(0).gt(0).any()
-        min_dwell = st.slider(
-            "Minimale standtijd (min)",
-            min_value=0,
-            max_value=180,
-            value=30 if has_dwell else 0,
-            step=5,
-            disabled=not has_dwell,
-            help=(
-                "Stops korter dan dit worden genegeerd (laden is dan onrealistisch)."
-                if has_dwell
-                else "Niet beschikbaar in trip-summary modus."
-            ),
-        )
+        if mode == "📅 Maand-CSV's":
+            min_dwell = 0
+        else:
+            min_dwell = st.slider(
+                "Minimale standtijd (min)",
+                min_value=0,
+                max_value=180,
+                value=0,
+                step=5,
+                disabled=not has_dwell,
+                help=(
+                    "Stops korter dan dit worden genegeerd "
+                    "(laden is dan onrealistisch)."
+                    if has_dwell
+                    else "Niet beschikbaar in trip-summary modus."
+                ),
+            )
 
         wagencodes_all = sorted(df["wagencode"].dropna().astype(str).unique().tolist())
         sel_wagens = st.multiselect(
@@ -636,7 +953,20 @@ def main() -> None:
 
         st.header("Kaartlagen")
         show_heatmap = st.checkbox("Heatmap", value=True)
-        show_markers = st.checkbox("Stop-markers", value=False)
+        show_markers = st.checkbox("Drukste stop-locaties", value=False)
+        marker_top_n = st.slider(
+            "Aantal locaties (top N op unieke wagens)",
+            min_value=50,
+            max_value=5000,
+            value=250,
+            step=50,
+            disabled=not show_markers,
+            help=(
+                "Groepeert per adres, telt hoeveel unieke vrachtwagens deze "
+                "locatie bezoeken, en toont de top N. Default 250 = de drukste "
+                "knooppunten — beste indicatie voor kandidaat-laadlocaties."
+            ),
+        )
         show_routes = st.checkbox("Routelijnen", value=False)
         use_road_routes = st.checkbox(
             "→ volg wegennet (OSRM)",
@@ -664,18 +994,52 @@ def main() -> None:
             step=1,
             disabled=not (show_road_heatmap or (show_routes and use_road_routes)),
             help=(
-                "Wegvlakken/routelijnen met minder unieke wagens worden verborgen. "
-                "Routelijnen krijgen een kleurverloop van licht paars (net boven "
-                "drempel) naar donkerpaars (drukst bereden)."
+                "Een 'wegvlak' is een stukje weg van ca. 50-200 m "
+                "(OSRM road-graph edge). Heel Nederland heeft >500.000 "
+                "wegvlakken in deze data. Wegvlakken met minder unieke "
+                "wagens dan deze drempel worden verborgen."
             ),
         )
-        show_chargers = st.checkbox("Publieke laders (OCM)", value=False)
+        road_show_pct = st.slider(
+            "Toon top X% drukste wegvlakken",
+            min_value=1,
+            max_value=25,
+            value=1,
+            step=1,
+            disabled=not (show_routes and use_road_routes),
+            help=(
+                "Van alle wegvlakken boven de drempel: toon alleen de "
+                "drukst bereden top X%. Voorkomt dat de kaart dichtslibt. "
+                "1% bij ~500k wegvlakken = 5.000 lijnen (= goed leesbaar). "
+                "Hogere percentages = meer detail, maar trager."
+            ),
+        )
+        show_chargers = st.checkbox(
+            "Geverifieerde HDV-laadlocaties",
+            value=False,
+            help=(
+                "Handmatig geverifieerde laadlocaties die toegankelijk zijn "
+                "voor vrachtwagens (244 locaties)."
+            ),
+        )
         charger_min_kw = st.slider(
             "Min. laadvermogen (kW)",
-            min_value=50,
+            min_value=0,
             max_value=400,
-            value=int(DEFAULT_MIN_POWER_KW),
+            value=150,
             step=50,
+            disabled=not show_chargers,
+        )
+        charger_only_dedicated = st.checkbox(
+            "Alleen dedicated voor HDV",
+            value=False,
+            disabled=not show_chargers,
+            help="Alleen locaties die exclusief voor vrachtwagens zijn ingericht.",
+        )
+        charger_access = st.multiselect(
+            "Toegankelijkheid",
+            ["Publiek", "Semi-publiek", "Privaat"],
+            default=["Publiek", "Semi-publiek"],
             disabled=not show_chargers,
         )
 
@@ -705,26 +1069,36 @@ def main() -> None:
         st.warning("Geen stops over na filtering. Pas filters aan.")
         return
 
-    tab_map, tab_dash = st.tabs(["🗺️ Kaart", "📊 Dashboard"])
+    tab_map, tab_dash, tab_sim = st.tabs(
+        ["🗺️ Kaart", "📊 Dashboard", "🔋 Simulatie"]
+    )
 
     chargers_df = pd.DataFrame()
     charger_error: str | None = None
     if show_chargers:
         try:
             chargers_df = _load_chargers(charger_min_kw)
-        except OCMKeyMissing as e:
+            if charger_only_dedicated:
+                chargers_df = chargers_df[
+                    chargers_df["dedicated"].astype("string").str.strip() == "Ja"
+                ]
+            if charger_access:
+                chargers_df = chargers_df[
+                    chargers_df["toegankelijkheid"].isin(charger_access)
+                ]
+        except FileNotFoundError as e:
             charger_error = str(e)
         except Exception as e:
-            charger_error = f"Ophalen laders mislukt: {e}"
+            charger_error = f"Laden van HDV-laadlocaties mislukt: {e}"
 
         with st.sidebar:
             if charger_error:
-                st.error(f"⚠️ Publieke laders niet geladen.\n\n{charger_error}")
+                st.error(f"⚠️ HDV-laadlocaties niet geladen.\n\n{charger_error}")
             elif chargers_df.empty:
-                st.info(f"Geen laders ≥ {charger_min_kw} kW gevonden in NL.")
+                st.info("Geen laders die aan filters voldoen.")
             else:
                 st.success(
-                    f"✅ {len(chargers_df)} laders ≥ {charger_min_kw} kW geladen "
+                    f"✅ {len(chargers_df)} HDV-laadlocaties geladen "
                     "(🟢 groene bliksem-markers op de kaart)."
                 )
 
@@ -732,74 +1106,189 @@ def main() -> None:
         center = [stops["lat"].mean(), stops["lon"].mean()]
         fmap = folium.Map(location=center, zoom_start=8, tiles="OpenStreetMap")
 
+        HEATMAP_AGG_THRESHOLD = 50_000
         if show_heatmap:
-            heat_points = stops[["lat", "lon", "dwell_min"]].values.tolist()
+            if len(stops) > HEATMAP_AGG_THRESHOLD:
+                agg = (
+                    stops.assign(
+                        lat_b=stops["lat"].round(3),
+                        lon_b=stops["lon"].round(3),
+                    )
+                    .groupby(["lat_b", "lon_b"], sort=False)
+                    .agg(weight=("dwell_min", lambda s: max(s.sum(), 1)))
+                    .reset_index()
+                )
+                heat_points = agg[["lat_b", "lon_b", "weight"]].values.tolist()
+                st.caption(
+                    f"⚡ Heatmap geaggregeerd: {len(agg):,} cellen "
+                    f"(uit {len(stops):,} stops, ~110 m grid)."
+                    .replace(",", ".")
+                )
+            else:
+                heat_points = stops[["lat", "lon", "dwell_min"]].values.tolist()
             HeatMap(heat_points, radius=14, blur=20, min_opacity=0.3).add_to(fmap)
 
         if show_markers:
+            loc_agg = (
+                stops.groupby("adres", sort=False)
+                .agg(
+                    lat=("lat", "first"),
+                    lon=("lon", "first"),
+                    locatie_naam=("locatie_naam", "first"),
+                    n_unieke_wagens=("wagencode", "nunique"),
+                    n_stops=("trip_id", "size"),
+                    n_trips=("trip_id", "nunique"),
+                    gem_rijduur_min=("dwell_min", "mean"),
+                )
+                .reset_index()
+                .nlargest(marker_top_n, "n_unieke_wagens")
+            )
+            st.caption(
+                f"⚡ Top-{marker_top_n:,} drukste locaties getoond uit "
+                f"{stops['adres'].nunique():,} unieke adressen "
+                f"(sortering: aantal unieke wagens)."
+                .replace(",", ".")
+            )
             cluster = MarkerCluster().add_to(fmap)
-            for _, row in stops.iterrows():
+            max_w = int(loc_agg["n_unieke_wagens"].max()) if not loc_agg.empty else 1
+            for r in loc_agg.itertuples(index=False):
+                radius = 4 + 8 * (int(r.n_unieke_wagens) / max(max_w, 1))
                 popup = folium.Popup(
                     html=(
-                        f"<b>{row['locatie_naam'] or '(onbekend)'}</b><br>"
-                        f"{row['adres'] or ''}<br>"
-                        f"Wagen: {row['wagencode']}<br>"
-                        f"Datum: {row['trip_date'].date() if pd.notna(row['trip_date']) else ''}<br>"
-                        f"Actie: {row['acties']}<br>"
-                        f"Standtijd: {int(row['dwell_min'])} min"
-                    ),
-                    max_width=280,
+                        f"<b>{r.locatie_naam or '(onbekend)'}</b><br>"
+                        f"{r.adres or ''}<br>"
+                        f"🚛 <b>{int(r.n_unieke_wagens)} unieke wagens</b><br>"
+                        f"📍 {int(r.n_stops):,} stops · {int(r.n_trips):,} trips<br>"
+                        f"⏱️ Gem. rijduur ernaartoe: {r.gem_rijduur_min:.0f} min"
+                    ).replace(",", "."),
+                    max_width=300,
                 )
                 folium.CircleMarker(
-                    location=[row["lat"], row["lon"]],
-                    radius=4,
+                    location=[r.lat, r.lon],
+                    radius=radius,
                     color="#1f77b4",
                     fill=True,
-                    fill_opacity=0.7,
+                    fill_opacity=0.6,
+                    weight=1,
                     popup=popup,
+                    tooltip=f"{int(r.n_unieke_wagens)} unieke wagens",
                 ).add_to(cluster)
 
         routes: dict = {}
         need_osrm = (show_routes and use_road_routes) or show_road_heatmap
         if need_osrm:
             segs = unique_segments(stops)
-            st.info(
-                f"Ophalen wegroute voor {len(segs)} unieke segmenten "
-                "(gecached voor volgende keer)."
-            )
-            progress = st.progress(0.0)
+            cached_routes, missing_n = load_cached_routes(segs)
+            if missing_n == 0:
+                routes = cached_routes
+            else:
+                eta_min = missing_n * 0.25 / 60
+                if missing_n > 500:
+                    st.warning(
+                        f"⚠️ {missing_n} nieuwe segmenten op te halen "
+                        f"(~{eta_min:.0f} min). Tijdens het ophalen kan de "
+                        "verbinding via Cloudflare time-outen — fetch loopt "
+                        "lokaal door en cachet incrementeel. "
+                        "**Tip:** filter eerst op datum/wagen voor snellere demo."
+                    )
+                    if not st.button(
+                        f"Toch alle {missing_n} segmenten ophalen",
+                        key="confirm_osrm_fetch",
+                    ):
+                        st.info(
+                            "OSRM-routes overgeslagen. Filter eerst, of klik "
+                            "op de knop hierboven om alsnog te starten."
+                        )
+                        routes = cached_routes
+                        need_osrm = False
+                    else:
+                        st.info(
+                            f"Ophalen {missing_n} nieuwe segmenten "
+                            f"(+ {len(segs) - missing_n} uit cache)..."
+                        )
+                        progress = st.progress(0.0)
 
-            def _cb(i: int, total: int) -> None:
-                progress.progress(min(1.0, i / max(total, 1)))
+                        def _cb(i: int, total: int) -> None:
+                            progress.progress(min(1.0, i / max(total, 1)))
 
-            routes = fetch_routes(segs, progress_cb=_cb)
-            progress.empty()
+                        routes = fetch_routes(segs, progress_cb=_cb)
+                        progress.empty()
+                else:
+                    st.info(
+                        f"Ophalen {missing_n} nieuwe segmenten "
+                        f"(+ {len(segs) - missing_n} uit cache, ~{eta_min:.1f} min)..."
+                    )
+                    progress = st.progress(0.0)
+
+                    def _cb(i: int, total: int) -> None:
+                        progress.progress(min(1.0, i / max(total, 1)))
+
+                    routes = fetch_routes(segs, progress_cb=_cb)
+                    progress.empty()
+
+        cache_variant = _detect_cache_variant(stops, df)
 
         if show_routes and use_road_routes:
-            with st.spinner("Wegvlakken wegen en kleuren..."):
-                edges = compute_weighted_edges(stops, routes)
-            if edges:
-                max_n = max(n for _, _, n in edges)
-                kept = [(p1, p2, n) for p1, p2, n in edges if n >= road_threshold]
-                if not kept:
+            edges_df: pd.DataFrame | None = None
+            if cache_variant:
+                edges_df = _load_cached_weighted_edges_df(cache_variant)
+                if edges_df is not None and not edges_df.empty:
+                    st.caption(
+                        f"⚡ {len(edges_df):,} wegvlakken uit pre-compute cache "
+                        f"(variant: {cache_variant})."
+                        .replace(",", ".")
+                    )
+            if edges_df is None:
+                with st.spinner("Wegvlakken wegen en kleuren..."):
+                    edges = compute_weighted_edges(stops, routes)
+                edges_df = pd.DataFrame(
+                    [
+                        {"lat1": p1[0], "lon1": p1[1], "lat2": p2[0], "lon2": p2[1], "n_wagens": n}
+                        for p1, p2, n in edges
+                    ]
+                )
+            if edges_df is not None and not edges_df.empty:
+                max_n = int(edges_df["n_wagens"].max())
+                filtered = edges_df[edges_df["n_wagens"] >= road_threshold]
+                if filtered.empty:
                     st.warning(
                         f"Geen wegvlak heeft ≥ {road_threshold} unieke wagens "
                         f"(max in dataset = {max_n}). Zet de drempel lager."
                     )
-                denom = max(1, max_n - road_threshold)
-                for p1, p2, n in kept:
-                    t = (n - road_threshold) / denom
-                    color = lerp_hex("#ddd6fe", "#4c1d95", t)
-                    weight = 1.2 + 4.8 * t
-                    folium.PolyLine(
-                        [p1, p2],
-                        color=color,
-                        weight=weight,
-                        opacity=0.85,
-                        tooltip=f"{n} unieke wagens",
-                    ).add_to(fmap)
+                else:
+                    target_n = max(50, int(len(filtered) * road_show_pct / 100))
+                    if len(filtered) > target_n:
+                        top = filtered.nlargest(target_n, "n_wagens")
+                        st.info(
+                            f"ℹ️ {len(filtered):,} wegvlakken boven drempel · "
+                            f"top {road_show_pct}% getekend = {target_n:,} lijnen."
+                            .replace(",", ".")
+                        )
+                    else:
+                        top = filtered
+                    denom = max(1, max_n - road_threshold)
+                    for r in top.itertuples(index=False):
+                        n = int(r.n_wagens)
+                        t = (n - road_threshold) / denom
+                        color = lerp_hex("#ddd6fe", "#4c1d95", t)
+                        weight = 1.2 + 4.8 * t
+                        folium.PolyLine(
+                            [(r.lat1, r.lon1), (r.lat2, r.lon2)],
+                            color=color,
+                            weight=weight,
+                            opacity=0.85,
+                            tooltip=f"{n} unieke wagens",
+                        ).add_to(fmap)
         elif show_routes:
-            for _, g in stops.groupby(["wagencode", "trip_date", "trip_id"]):
+            TRIP_CAP = 2000
+            trip_groups = list(stops.groupby(["wagencode", "trip_date", "trip_id"]))
+            if len(trip_groups) > TRIP_CAP:
+                st.info(
+                    f"ℹ️ {len(trip_groups):,} trips — alleen eerste {TRIP_CAP} "
+                    "getekend (rechte lijnen). Filter eerst voor specifieke trips."
+                )
+                trip_groups = trip_groups[:TRIP_CAP]
+            for _, g in trip_groups:
                 if len(g) < 2:
                     continue
                 coords = g[["lat", "lon"]].values.tolist()
@@ -809,8 +1298,18 @@ def main() -> None:
 
         road_heat_points: list[tuple[float, float, float]] = []
         if show_road_heatmap:
-            with st.spinner("Wegvlak-heatmap berekenen..."):
-                all_points = compute_road_heatmap_points(stops, routes)
+            all_points = None
+            if cache_variant:
+                all_points = _load_cached_road_heatmap(cache_variant)
+                if all_points:
+                    st.caption(
+                        f"⚡ {len(all_points):,} wegvlak-cellen geladen uit pre-compute cache "
+                        f"(variant: {cache_variant})."
+                        .replace(",", ".")
+                    )
+            if all_points is None:
+                with st.spinner("Wegvlak-heatmap berekenen..."):
+                    all_points = compute_road_heatmap_points(stops, routes)
             road_heat_points = [p for p in all_points if p[2] >= road_threshold]
             if road_heat_points:
                 HeatMap(
@@ -829,31 +1328,42 @@ def main() -> None:
 
         if show_chargers and not chargers_df.empty:
             for _, c in chargers_df.iterrows():
+                dedicated = (c.get("dedicated") or "").strip()
+                t247 = (c.get("twentyfour_seven") or "").strip()
+                acces = (c.get("toegankelijkheid") or "").strip()
+                ccs = (c.get("ccs_mcs") or "").strip()
                 popup = folium.Popup(
                     html=(
                         f"<b>{c['name'] or '(naamloos)'}</b><br>"
-                        f"{c['operator'] or ''}<br>"
                         f"{c['address']}, {c['postcode']} {c['town']}<br>"
-                        f"Max vermogen: {int(c['max_power_kw'])} kW<br>"
-                        f"Connectoren: {int(c['n_connectors'])}"
+                        f"⚡ Max {int(c['max_power_kw'])} kW · {int(c['n_connectors'])} laadpalen<br>"
+                        f"🔌 {ccs or 'onbekend'}<br>"
+                        f"🚪 {acces or 'onbekend'}"
+                        + (f" · 24/7" if t247 == "Ja" else "")
+                        + (f" · 🚛 dedicated HDV" if dedicated == "Ja" else "")
                     ),
-                    max_width=280,
+                    max_width=300,
                 )
                 folium.Marker(
                     location=[c["lat"], c["lon"]],
                     icon=folium.Icon(color="green", icon="bolt", prefix="fa"),
-                    tooltip=f"⚡ {c['name'] or 'lader'} — {int(c['max_power_kw'])} kW",
+                    tooltip=(
+                        f"⚡ {c['name'] or 'lader'} — {int(c['max_power_kw'])} kW"
+                        + (" · HDV" if dedicated == "Ja" else "")
+                    ),
                     popup=popup,
                 ).add_to(fmap)
             st.caption(
-                f"🟢 Groene bliksem-markers = {len(chargers_df)} publieke laders "
-                f"≥ {charger_min_kw} kW (bron: Open Charge Map). "
-                "Klik op een marker voor details."
+                f"🟢 Groene bliksem-markers = {len(chargers_df)} geverifieerde "
+                f"HDV-laadlocaties ≥ {charger_min_kw} kW. Klik op een marker voor details."
             )
         st_folium(fmap, height=620, use_container_width=True, returned_objects=[])
 
     with tab_dash:
         _render_dashboard(stops, chargers_df, road_threshold)
+
+    with tab_sim:
+        _render_simulation(stops)
 
 
 if __name__ == "__main__":

@@ -7,3 +7,10 @@ font = "sans serif"
 
 [server]
 headless = true
+enableXsrfProtection = false
+enableCORS = false
+
+[browser]
+serverAddress = "route-analyse.nijenhuistrucksolutions.nl"
+serverPort = 443
+gatherUsageStats = false
