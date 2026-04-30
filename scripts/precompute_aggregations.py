@@ -175,7 +175,7 @@ def _process_variant(df_full: pd.DataFrame, routes: dict, variant: str) -> None:
         flush=True,
     )
 
-    del seg_wagens, edges, cells, edges_df, heat_df
+    del seg_data, edges, cells, edges_df, heat_df
     gc.collect()
 
 
