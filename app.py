@@ -34,6 +34,7 @@ from src.road_usage import (
     compute_road_heatmap_points,
     compute_weighted_edges,
     lerp_hex,
+    merge_identical_chains,
     top_road_hotspots,
 )
 from src.routing import (
@@ -277,11 +278,15 @@ def _detect_schema_cached(path: str, mtime: float) -> tuple[str, str] | None:
 
 @st.cache_data(show_spinner=False)
 def _load_cached_weighted_edges_df(variant: str) -> pd.DataFrame | None:
-    """Laad pre-computed weighted edges per variant als DataFrame."""
+    """Laad pre-computed weighted edges per variant als DataFrame.
+    Voegt fallback n_passes-kolom toe als parquet nog van oude schema is."""
     p = Path(f".cache/agg_weighted_edges_{variant}.parquet")
     if not p.exists():
         return None
-    return pd.read_parquet(p)
+    df = pd.read_parquet(p)
+    if "n_passes" not in df.columns:
+        df["n_passes"] = df["n_wagens"]  # fallback voor oude parquet-schema
+    return df
 
 
 @st.cache_data(show_spinner=False)
@@ -500,12 +505,51 @@ def _render_simulation(stops: pd.DataFrame) -> None:
         )
 
 
+def _build_excel_export(
+    filters_info: dict,
+    stops_df: pd.DataFrame,
+    corridors_df: pd.DataFrame,
+    edges_df: pd.DataFrame | None,
+) -> bytes:
+    """Build multi-sheet Excel met filters + top-tabellen voor PostNL."""
+    import io
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        pd.DataFrame(
+            [{"parameter": k, "waarde": v} for k, v in filters_info.items()]
+        ).to_excel(writer, sheet_name="Filters", index=False)
+        if not stops_df.empty:
+            stops_df.to_excel(writer, sheet_name="Top stop-locaties", index=False)
+        if not corridors_df.empty:
+            corridors_df.to_excel(writer, sheet_name="Top corridors", index=False)
+        if edges_df is not None and not edges_df.empty:
+            edges_df.to_excel(writer, sheet_name="Top wegvlakken", index=False)
+    buf.seek(0)
+    return buf.read()
+
+
+_HOTSPOTS_COLUMN_LABELS = {
+    "lat_round": "Lat (~110 m raster)",
+    "lon_round": "Lon (~110 m raster)",
+    "locatie_naam": "Locatienaam",
+    "adres": "Adres",
+    "n_stops": "Keer bezocht",
+    "n_wagens": "Unieke wagens",
+    "n_trips": "Unieke trips",
+    "totale_standtijd_uur": "Totale rijduur (uur)",
+    "gem_standtijd_min": "Gem. rijduur (min)",
+    "afstand_lader_km": "Afstand naar lader (km)",
+    "maps": "Kaart",
+}
+
+
 def _render_dashboard(
     stops: pd.DataFrame,
     chargers_df: pd.DataFrame,
     road_threshold: int,
 ) -> None:
-    """Dashboard-tab: KPI's, top-20 stops, top-20 wegvlakken, trends."""
+    """Dashboard-tab: KPI's, top stops, top corridors, top wegvlakken, trends."""
     st.subheader("Kern-KPI's")
     total_km = float(stops["afstand_km"].fillna(0).sum())
     avg_trip_km = (
@@ -528,144 +572,279 @@ def _render_dashboard(
 
     st.divider()
 
-    col_left, col_right = st.columns([1, 1])
+    # === Top stop-locaties ===
+    st.subheader("Top 50 stop-locaties (op aantal unieke wagens)")
+    st.caption(
+        "Geclusterd per ~110 m grid-cel — **Lat / Lon** zijn breedte- en "
+        "lengtegraad van het centrum van die cel.  \n"
+        "**Keer bezocht** = aantal stops totaal · "
+        "**Unieke wagens** = aantal verschillende vrachtwagens · "
+        "**Unieke trips** = aantal verschillende ritten.  \n"
+        "**Totale rijduur (uur)** = som van alle reistijden naar deze locatie "
+        "(één hoge waarde betekent: vaak bezocht én/of vanuit verre afstand). "
+        "**Gem. rijduur (min)** = gemiddelde reistijd per bezoek "
+        "(hoog = trucks rijden lang om hier te komen — interessant voor laadinfra "
+        "want accu komt hier vaak leeg aan)."
+    )
+    hotspots = rank_hotspots(stops)
+    if not chargers_df.empty:
+        hotspots = add_nearest_charger_distance(hotspots, chargers_df)
+    top_stops = hotspots.head(50).copy()
+    top_stops["maps"] = top_stops.apply(
+        lambda r: f"https://www.google.com/maps?q={r['lat_round']},{r['lon_round']}",
+        axis=1,
+    )
+    st.dataframe(
+        top_stops,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            **{
+                col: st.column_config.Column(label)
+                for col, label in _HOTSPOTS_COLUMN_LABELS.items()
+                if col != "maps"
+            },
+            "maps": st.column_config.LinkColumn(
+                "Kaart", display_text="📍 Open"
+            ),
+        },
+    )
+    st.download_button(
+        "Download top stop-locaties als CSV",
+        data=hotspots.to_csv(index=False).encode("utf-8"),
+        file_name="top_stop_locaties.csv",
+        mime="text/csv",
+        key="dl_hotspots",
+    )
 
-    with col_left:
-        st.subheader("Top 20 stop-locaties")
-        hotspots = rank_hotspots(stops)
-        if not chargers_df.empty:
-            hotspots = add_nearest_charger_distance(hotspots, chargers_df)
-        top_stops = hotspots.head(20).copy()
-        top_stops["maps"] = top_stops.apply(
-            lambda r: f"https://www.google.com/maps?q={r['lat_round']},{r['lon_round']}",
-            axis=1,
+    st.divider()
+
+    # === Top corridors ===
+    st.subheader(f"Top 20 corridors (≥ {road_threshold} wagens, gesorteerd op lengte)")
+    st.caption(
+        "Aaneengesloten wegvlakken boven de drempel worden samengevoegd tot "
+        "één corridor. Drempel aanpassen via sidebar 'Min. aantal unieke wagens'."
+    )
+    segs = unique_segments(stops)
+    cached_routes, missing = load_cached_routes(segs)
+    corridors_df_export = pd.DataFrame()
+    edges_df_export: pd.DataFrame | None = None
+    if missing > 0 and not cached_routes:
+        st.info(
+            f"Wegvlak-data nog niet gecached ({missing}/{len(segs)} segmenten). "
+            "Zet op de Kaart-tab eenmalig **Routelijnen → volg wegennet** aan."
+        )
+    else:
+        edges = compute_weighted_edges(stops, cached_routes)
+        if missing:
+            st.caption(
+                f"⚠️ {missing}/{len(segs)} segmenten ontbreken in cache — "
+                f"cijfers zijn op basis van {len(segs) - missing} gecachede segmenten."
+            )
+        corridors = compute_corridors(edges, threshold=road_threshold)
+        top_corridors = corridors[:20]
+        if not top_corridors:
+            st.warning(
+                f"Geen corridors met ≥ {road_threshold} wagens. Zet de drempel lager."
+            )
+        else:
+            centers = [c["center"] for c in top_corridors]
+            with st.spinner("Wegnamen opzoeken (gecached)..."):
+                names = reverse_geocode(centers)
+
+            mini = folium.Map(
+                location=[52.1, 5.3], zoom_start=7, tiles="OpenStreetMap"
+            )
+            rows = []
+            for rank, (corridor, (lat_c, lon_c)) in enumerate(
+                zip(top_corridors, centers), start=1
+            ):
+                info = names.get(
+                    (round(lat_c, 4), round(lon_c, 4)),
+                    {"road": "", "town": "", "display": ""},
+                )
+                weg = info["road"] or "(onbekend)"
+                plaats = info["town"] or ""
+                for p1, p2, _ in corridor["edges"]:
+                    folium.PolyLine(
+                        [p1, p2], color="#dc2626", weight=5, opacity=0.85
+                    ).add_to(mini)
+                folium.Marker(
+                    location=[lat_c, lon_c],
+                    icon=folium.DivIcon(
+                        html=(
+                            f'<div style="background:#dc2626;color:white;'
+                            f"border:2px solid white;border-radius:50%;"
+                            f"width:26px;height:26px;text-align:center;"
+                            f"line-height:22px;font-weight:bold;"
+                            f'font-size:12px;">{rank}</div>'
+                        )
+                    ),
+                    tooltip=(
+                        f"#{rank} — {weg}, {plaats} · "
+                        f"{corridor['length_km']:.1f} km · "
+                        f"max {corridor['max_n']} wagens"
+                    ),
+                ).add_to(mini)
+                rows.append(
+                    {
+                        "#": rank,
+                        "wegnaam": weg,
+                        "plaats": plaats,
+                        "med_passages": int(corridor["median_passes"]),
+                        "max_passages": int(corridor["max_passes"]),
+                        "max_wagens": int(corridor["max_n"]),
+                        "med_wagens": int(corridor["median_n"]),
+                        "spreiding_km": round(corridor["spreiding_km"], 1),
+                        "totale_km": round(corridor["length_km"], 1),
+                        "n_wegvlakken": corridor["n_edges"],
+                        "lat": round(lat_c, 5),
+                        "lon": round(lon_c, 5),
+                        "maps": f"https://www.google.com/maps?q={lat_c},{lon_c}",
+                    }
+                )
+            st_folium(
+                mini, height=320, use_container_width=True, returned_objects=[]
+            )
+            st.caption(
+                "**Sortering:** mediaan aantal passages per wegvlak (drukst eerst).  \n"
+                "**Med./max passages** = aantal keer dat een truck dit wegvlak "
+                "gebruikt heeft (gem./hoogste binnen de corridor).  \n"
+                "**Med./max wagens** = aantal verschillende vrachtwagens.  \n"
+                "**Spreiding (km)** = hemelsbrede afstand tussen verste hoeken "
+                "(realistische 'lengte' van de corridor).  \n"
+                "**Totale km** = som van alle micro-segmenten incl. zijwegen "
+                "(bij een lage drempel verbindt het algoritme hele netwerken — "
+                "dat is dan misleidend hoog)."
+            )
+            corridors_df_export = pd.DataFrame(rows)
+            st.dataframe(
+                corridors_df_export,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "med_passages": st.column_config.Column(
+                        "Med. passages", help="Mediaan keer-bereden per wegvlak"
+                    ),
+                    "max_passages": st.column_config.Column("Max passages"),
+                    "max_wagens": st.column_config.Column("Max wagens"),
+                    "med_wagens": st.column_config.Column("Med. wagens"),
+                    "spreiding_km": st.column_config.NumberColumn(
+                        "Spreiding (km)", format="%.1f"
+                    ),
+                    "totale_km": st.column_config.NumberColumn(
+                        "Totale stukjes (km)", format="%.1f"
+                    ),
+                    "n_wegvlakken": st.column_config.Column("Wegvlakken"),
+                    "maps": st.column_config.LinkColumn(
+                        "Kaart", display_text="🛣️ Open"
+                    ),
+                },
+            )
+            st.download_button(
+                "Download top corridors als CSV",
+                data=corridors_df_export.to_csv(index=False).encode("utf-8"),
+                file_name="top_corridors.csv",
+                mime="text/csv",
+                key="dl_corridors",
+            )
+
+        # Top wegvlakken — micro-edges met identieke metrics zijn samengevoegd
+        st.divider()
+        st.subheader("Top 100 drukste wegvlakken")
+        st.caption(
+            "Een wegvlak hier = aaneengesloten stukje weg waarop alle micro-segmenten "
+            "dezelfde gebruiksstatistiek hebben (OSRM splitst een doorgaand wegstuk "
+            "in vele 50-200 m vertices; die zijn samengevoegd).  \n"
+            "**Unieke wagens** = verschillende vrachtwagens · **Keer bereden** = "
+            "totaal aantal passages (één wagen kan vaker).  \n"
+            "Veel wagens × weinig passages = brede gebruikersgroep · "
+            "weinig wagens × veel passages = vaste route van enkele wagens."
+        )
+        # Filter alleen edges die door de drempel komen, anders te veel chains
+        busy_edges = [e for e in edges if e[2] >= road_threshold]
+        chains = merge_identical_chains(busy_edges)
+        chains_sorted = sorted(
+            chains, key=lambda c: (c["n_passes"], c["n_wagens"]), reverse=True
+        )[:100]
+
+        edges_df_export = pd.DataFrame(
+            [
+                {
+                    "rank": i + 1,
+                    "lat_van": round(c["lat1"], 6),
+                    "lon_van": round(c["lon1"], 6),
+                    "lat_tot": round(c["lat2"], 6),
+                    "lon_tot": round(c["lon2"], 6),
+                    "n_unieke_wagens": c["n_wagens"],
+                    "n_keer_bereden": c["n_passes"],
+                    "passages_per_wagen": round(
+                        c["n_passes"] / max(c["n_wagens"], 1), 1
+                    ),
+                    "lengte_m": int(c["length_km"] * 1000),
+                    "n_micro_edges": c["n_micro_edges"],
+                    "maps": f"https://www.google.com/maps?q={(c['lat1'] + c['lat2']) / 2},{(c['lon1'] + c['lon2']) / 2}",
+                }
+                for i, c in enumerate(chains_sorted)
+            ]
         )
         st.dataframe(
-            top_stops,
+            edges_df_export,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "maps": st.column_config.LinkColumn(
-                    "Kaart", display_text="📍 Open"
+                    "Kaart", display_text="🛣️ Open"
                 ),
             },
         )
         st.download_button(
-            "Download hotspots als CSV",
-            data=hotspots.to_csv(index=False).encode("utf-8"),
-            file_name="hotspots.csv",
+            "Download top wegvlakken als CSV",
+            data=edges_df_export.to_csv(index=False).encode("utf-8"),
+            file_name="top_wegvlakken.csv",
             mime="text/csv",
-            key="dl_hotspots",
+            key="dl_wegvlakken",
         )
 
-    with col_right:
-        st.subheader(f"Top 20 corridors (≥ {road_threshold} wagens, gesorteerd op lengte)")
-        st.caption(
-            "Aaneengesloten wegvlakken boven de drempel worden samengevoegd "
-            "tot één corridor. Drempel aanpassen via sidebar."
-        )
-        segs = unique_segments(stops)
-        cached_routes, missing = load_cached_routes(segs)
-        if missing > 0 and not cached_routes:
-            st.info(
-                f"Wegvlak-data nog niet gecached ({missing}/{len(segs)} segmenten). "
-                "Zet op de Kaart-tab eenmalig **Routelijnen → volg wegennet** aan "
-                "om deze tabel te vullen."
-            )
-        else:
-            edges = compute_weighted_edges(stops, cached_routes)
-            if missing:
-                st.caption(
-                    f"⚠️ {missing}/{len(segs)} segmenten ontbreken in cache — "
-                    f"cijfers zijn op basis van {len(segs) - missing} gecachede segmenten."
-                )
-            corridors = compute_corridors(edges, threshold=road_threshold)
-            top_corridors = corridors[:20]
-            if not top_corridors:
-                st.warning(
-                    f"Geen corridors met ≥ {road_threshold} wagens. "
-                    "Zet de drempel lager."
-                )
-            else:
-                centers = [c["center"] for c in top_corridors]
-                with st.spinner(
-                    "Wegnamen opzoeken (eerste keer ~25 s, daarna cache)..."
-                ):
-                    rev_progress = st.progress(0.0)
+    st.divider()
 
-                    def _rcb(i: int, total: int) -> None:
-                        rev_progress.progress(min(1.0, i / max(total, 1)))
-
-                    names = reverse_geocode(centers, progress_cb=_rcb)
-                    rev_progress.empty()
-
-                mini = folium.Map(
-                    location=[52.1, 5.3], zoom_start=7, tiles="OpenStreetMap"
-                )
-                rows = []
-                for rank, (corridor, (lat_c, lon_c)) in enumerate(
-                    zip(top_corridors, centers), start=1
-                ):
-                    info = names.get(
-                        (round(lat_c, 4), round(lon_c, 4)),
-                        {"road": "", "town": "", "display": ""},
-                    )
-                    weg = info["road"] or "(onbekend)"
-                    plaats = info["town"] or ""
-                    for p1, p2, _ in corridor["edges"]:
-                        folium.PolyLine(
-                            [p1, p2], color="#dc2626", weight=5, opacity=0.85
-                        ).add_to(mini)
-                    folium.Marker(
-                        location=[lat_c, lon_c],
-                        icon=folium.DivIcon(
-                            html=(
-                                f'<div style="background:#dc2626;color:white;'
-                                f"border:2px solid white;border-radius:50%;"
-                                f"width:26px;height:26px;text-align:center;"
-                                f"line-height:22px;font-weight:bold;"
-                                f'font-size:12px;">{rank}</div>'
-                            )
-                        ),
-                        tooltip=(
-                            f"#{rank} — {weg}, {plaats} · "
-                            f"{corridor['length_km']:.1f} km · "
-                            f"max {corridor['max_n']} wagens"
-                        ),
-                    ).add_to(mini)
-                    rows.append(
-                        {
-                            "#": rank,
-                            "lengte_km": round(corridor["length_km"], 2),
-                            "max_wagens": corridor["max_n"],
-                            "med_wagens": corridor["median_n"],
-                            "wegnaam": weg,
-                            "plaats": plaats,
-                            "maps": f"https://www.google.com/maps?q={lat_c},{lon_c}",
-                        }
-                    )
-                st_folium(
-                    mini, height=300, use_container_width=True, returned_objects=[]
-                )
-
-                edges_df = pd.DataFrame(rows)
-                st.dataframe(
-                    edges_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "maps": st.column_config.LinkColumn(
-                            "Kaart", display_text="🛣️ Open"
-                        ),
-                    },
-                )
-                st.download_button(
-                    "Download corridors als CSV",
-                    data=edges_df.to_csv(index=False).encode("utf-8"),
-                    file_name="corridors_top20.csv",
-                    mime="text/csv",
-                    key="dl_corridors",
-                )
+    # === Excel export — alles in één bestand ===
+    st.subheader("Excel-export voor PostNL")
+    st.caption(
+        "Bevat de huidige selectie als 4 tabbladen: Filters, Top stop-locaties, "
+        "Top corridors, Top wegvlakken."
+    )
+    filters_info = {
+        "Modus": stops.get("acties", pd.Series()).iloc[0]
+        if not stops.empty and "acties" in stops.columns
+        else "",
+        "Totaal stops": f"{len(stops):,}".replace(",", "."),
+        "Unieke trips": f"{stops['trip_id'].nunique():,}".replace(",", "."),
+        "Unieke wagens": f"{stops['wagencode'].nunique():,}".replace(",", "."),
+        "Datum vanaf": (
+            str(stops["trip_date"].min().date()) if not stops.empty else ""
+        ),
+        "Datum tot": (
+            str(stops["trip_date"].max().date()) if not stops.empty else ""
+        ),
+        "Min. wagens per wegvlak": road_threshold,
+        "Vervoerder-types": ", ".join(
+            sorted(stops["vervoerder_type"].dropna().unique().tolist())
+        ),
+    }
+    excel_bytes = _build_excel_export(
+        filters_info,
+        top_stops,
+        corridors_df_export,
+        edges_df_export,
+    )
+    st.download_button(
+        "Download volledig Excel-rapport",
+        data=excel_bytes,
+        file_name="postnl_route_analyse_export.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_excel_full",
+    )
 
     st.divider()
 
@@ -1243,8 +1422,15 @@ def main() -> None:
                     edges = compute_weighted_edges(stops, routes)
                 edges_df = pd.DataFrame(
                     [
-                        {"lat1": p1[0], "lon1": p1[1], "lat2": p2[0], "lon2": p2[1], "n_wagens": n}
-                        for p1, p2, n in edges
+                        {
+                            "lat1": e[0][0],
+                            "lon1": e[0][1],
+                            "lat2": e[1][0],
+                            "lon2": e[1][1],
+                            "n_wagens": e[2],
+                            "n_passes": e[3] if len(e) > 3 else e[2],
+                        }
+                        for e in edges
                     ]
                 )
             if edges_df is not None and not edges_df.empty:
@@ -1317,7 +1503,13 @@ def main() -> None:
                     radius=8,
                     blur=12,
                     min_opacity=0.35,
-                    gradient={"0.3": "#3b82f6", "0.6": "#f59e0b", "0.9": "#ef4444"},
+                    gradient={
+                        "0.05": "#1e3a8a",
+                        "0.2": "#3b82f6",
+                        "0.4": "#f59e0b",
+                        "0.65": "#dc2626",
+                        "1.0": "#7f1d1d",
+                    },
                 ).add_to(fmap)
             elif all_points:
                 max_n = int(max(p[2] for p in all_points))
@@ -1357,6 +1549,59 @@ def main() -> None:
                 f"🟢 Groene bliksem-markers = {len(chargers_df)} geverifieerde "
                 f"HDV-laadlocaties ≥ {charger_min_kw} kW. Klik op een marker voor details."
             )
+
+        legend_items = []
+        if show_heatmap:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#0000ff,#00ff00,#ffff00,#ff0000);'
+                 'display:inline-block;width:36px;height:10px;border-radius:2px;"></span>',
+                 "Stop-heatmap (alle stops, gewogen op rijduur)")
+            )
+        if show_markers:
+            legend_items.append(
+                ('<span style="display:inline-block;width:14px;height:14px;border-radius:50%;'
+                 'background:#1f77b4;border:1px solid #1f77b4;opacity:0.6;"></span>',
+                 "Drukste stop-locaties (cirkelgrootte = aantal wagens)")
+            )
+        if show_routes and use_road_routes:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#ddd6fe,#4c1d95);'
+                 'display:inline-block;width:36px;height:8px;border-radius:2px;"></span>',
+                 "Wegvlakken (top X%) — donkerder = meer unieke wagens")
+            )
+        elif show_routes:
+            legend_items.append(
+                ('<span style="background:#6b21a8;display:inline-block;width:36px;height:3px;"></span>',
+                 "Routelijnen (rechte lijnen tussen stops)")
+            )
+        if show_road_heatmap:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#1e3a8a,#3b82f6,#f59e0b,#dc2626,#7f1d1d);'
+                 'display:inline-block;width:36px;height:10px;border-radius:2px;"></span>',
+                 "Wegvlak-heatmap (donkerrood = drukste corridors)")
+            )
+        if show_chargers and not chargers_df.empty:
+            legend_items.append(
+                ('<span style="color:#16a34a;font-size:14px;">⚡</span>',
+                 "Geverifieerde HDV-laadlocaties")
+            )
+
+        if legend_items:
+            legend_html = (
+                '<div style="position:fixed;bottom:30px;right:30px;z-index:9999;'
+                'background:rgba(255,255,255,0.95);border:1px solid #c9c8d3;'
+                'border-radius:10px;padding:10px 14px;font-family:Montserrat,Arial,sans-serif;'
+                'font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-width:340px;">'
+                '<div style="font-weight:600;color:#2e2343;margin-bottom:6px;">Legenda</div>'
+            )
+            for icon, label in legend_items:
+                legend_html += (
+                    f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">'
+                    f'{icon}<span style="color:#1a1a1f;">{label}</span></div>'
+                )
+            legend_html += "</div>"
+            fmap.get_root().html.add_child(folium.Element(legend_html))
+
         st_folium(fmap, height=620, use_container_width=True, returned_objects=[])
 
     with tab_dash:

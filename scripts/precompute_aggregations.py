@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import gc
 
-from src.road_usage import _segment_wagen_sets  # noqa: E402
+from src.road_usage import _segment_aggregates  # noqa: E402
 from src.routing import load_cached_routes, unique_segments  # noqa: E402
 
 PARQUET = Path(".cache/postnl_csv_Rittendata.parquet")
@@ -35,10 +35,11 @@ VARIANTS = {
 }
 
 
-def _chunked_segment_wagens(
+def _chunked_segment_aggregates(
     df_full: pd.DataFrame, vervoerder: str | None
-) -> dict[tuple, set[str]]:
-    """Process per maand om RAM-pieken te vermijden, accumuleer segment→wagen-sets."""
+) -> dict[tuple, dict]:
+    """Process per maand om RAM-pieken te vermijden, accumuleer
+    segment→{wagens, n_passes} aggregates."""
     df = df_full
     if vervoerder is not None:
         df = df[df["vervoerder_type"] == vervoerder]
@@ -49,35 +50,40 @@ def _chunked_segment_wagens(
     df = df.assign(_month=df["trip_date"].dt.to_period("M"))
     months = sorted(df["_month"].unique())
 
-    accum: dict[tuple, set[str]] = {}
+    accum: dict[tuple, dict] = {}
     for m in months:
         chunk = df[df["_month"] == m]
         t0 = time.time()
-        seg_w = _segment_wagen_sets(chunk)
-        for k, ws in seg_w.items():
-            accum.setdefault(k, set()).update(ws)
+        seg = _segment_aggregates(chunk)
+        for k, info in seg.items():
+            existing = accum.setdefault(k, {"wagens": set(), "n_passes": 0})
+            existing["wagens"].update(info["wagens"])
+            existing["n_passes"] += info["n_passes"]
         print(
-            f"    {m}: {len(chunk):,} stops, {len(seg_w):,} segs "
+            f"    {m}: {len(chunk):,} stops, {len(seg):,} segs "
             f"({time.time() - t0:.0f}s, accum={len(accum):,})",
             flush=True,
         )
-        del chunk, seg_w
+        del chunk, seg
         gc.collect()
 
     return accum
 
 
 def _attribute_polylines(
-    seg_wagens: dict[tuple, set[str]],
+    seg_data: dict[tuple, dict],
     routes: dict,
     edge_decimals: int = 6,
     cell_decimals: int = 3,
 ) -> tuple[list, list]:
-    """Walk polylines once per segment; attribute wagens to micro-edges en grid-cellen."""
-    edge_wagens: dict[tuple, set[str]] = {}
+    """Walk polylines once per segment; attribute wagens + passes
+    to micro-edges en grid-cellen."""
+    edge_data: dict[tuple, dict] = {}
     cell_wagens: dict[tuple[float, float], set[str]] = {}
 
-    for seg_key, wagens in seg_wagens.items():
+    for seg_key, info in seg_data.items():
+        wagens = info["wagens"]
+        n_passes = info["n_passes"]
         poly = routes.get(seg_key)
         if not poly:
             poly = [(seg_key[0], seg_key[1]), (seg_key[2], seg_key[3])]
@@ -89,7 +95,11 @@ def _attribute_polylines(
                 round(poly[i + 1][1], edge_decimals),
             )
             if p1 != p2:
-                edge_wagens.setdefault((p1, p2), set()).update(wagens)
+                d = edge_data.setdefault(
+                    (p1, p2), {"wagens": set(), "n_passes": 0}
+                )
+                d["wagens"].update(wagens)
+                d["n_passes"] += n_passes
             cell = (round(poly[i][0], cell_decimals), round(poly[i][1], cell_decimals))
             if cell not in seen_cells:
                 seen_cells.add(cell)
@@ -101,7 +111,10 @@ def _attribute_polylines(
         if last_cell not in seen_cells:
             cell_wagens.setdefault(last_cell, set()).update(wagens)
 
-    edges = [(p1, p2, len(w)) for (p1, p2), w in edge_wagens.items()]
+    edges = [
+        (p1, p2, len(d["wagens"]), d["n_passes"])
+        for (p1, p2), d in edge_data.items()
+    ]
     cells = [(lat, lon, float(len(w))) for (lat, lon), w in cell_wagens.items()]
     return edges, cells
 
@@ -118,18 +131,18 @@ def _process_variant(df_full: pd.DataFrame, routes: dict, variant: str) -> None:
     )
 
     t0 = time.time()
-    print(f"  Maand-chunks → segment-wagen sets...", flush=True)
-    seg_wagens = _chunked_segment_wagens(df_full, vervoerder)
-    if not seg_wagens:
+    print(f"  Maand-chunks → segment-aggregaties...", flush=True)
+    seg_data = _chunked_segment_aggregates(df_full, vervoerder)
+    if not seg_data:
         print(f"  Geen data voor '{variant}', skip.", flush=True)
         return
     print(
-        f"  {len(seg_wagens):,} unieke segmenten in {time.time() - t0:.0f}s",
+        f"  {len(seg_data):,} unieke segmenten in {time.time() - t0:.0f}s",
         flush=True,
     )
 
     t0 = time.time()
-    edges, cells = _attribute_polylines(seg_wagens, routes)
+    edges, cells = _attribute_polylines(seg_data, routes)
     print(
         f"  Polyline-attributie: {len(edges):,} edges + {len(cells):,} cells "
         f"in {time.time() - t0:.0f}s",
@@ -138,8 +151,15 @@ def _process_variant(df_full: pd.DataFrame, routes: dict, variant: str) -> None:
 
     edges_df = pd.DataFrame(
         [
-            {"lat1": p1[0], "lon1": p1[1], "lat2": p2[0], "lon2": p2[1], "n_wagens": n}
-            for p1, p2, n in edges
+            {
+                "lat1": p1[0],
+                "lon1": p1[1],
+                "lat2": p2[0],
+                "lon2": p2[1],
+                "n_wagens": n_wagens,
+                "n_passes": n_passes,
+            }
+            for p1, p2, n_wagens, n_passes in edges
         ]
     )
     edges_df.to_parquet(edges_out, index=False)
@@ -155,7 +175,7 @@ def _process_variant(df_full: pd.DataFrame, routes: dict, variant: str) -> None:
         flush=True,
     )
 
-    del seg_wagens, edges, cells, edges_df, heat_df
+    del seg_data, edges, cells, edges_df, heat_df
     gc.collect()
 
 
