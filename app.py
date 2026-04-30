@@ -1197,16 +1197,15 @@ def main() -> None:
         show_heatmap = st.checkbox("Heatmap", value=True)
         show_markers = st.checkbox("Drukste stop-locaties", value=False)
         marker_top_n = st.slider(
-            "Aantal locaties (top N op unieke wagens)",
+            "Aantal locaties (top N op aantal stops)",
             min_value=50,
             max_value=5000,
             value=250,
             step=50,
             disabled=not show_markers,
             help=(
-                "Groepeert per adres, telt hoeveel unieke vrachtwagens deze "
-                "locatie bezoeken, en toont de top N. Default 250 = de drukste "
-                "knooppunten — beste indicatie voor kandidaat-laadlocaties."
+                "Groepeert per adres, telt het totaal aantal stops daar, "
+                "en toont de top N. Default 250 = de vaakst bezochte locaties."
             ),
         )
         show_routes = st.checkbox(
@@ -1391,24 +1390,25 @@ def main() -> None:
                     gem_rijduur_min=("dwell_min", "mean"),
                 )
                 .reset_index()
-                .nlargest(marker_top_n, "n_unieke_wagens")
+                .nlargest(marker_top_n, "n_stops")
             )
             st.caption(
                 f"⚡ Top-{marker_top_n:,} drukste locaties getoond uit "
                 f"{stops['adres'].nunique():,} unieke adressen "
-                f"(sortering: aantal unieke wagens)."
+                f"(sortering: aantal stops)."
                 .replace(",", ".")
             )
             cluster = MarkerCluster().add_to(fmap)
-            max_w = int(loc_agg["n_unieke_wagens"].max()) if not loc_agg.empty else 1
+            max_s = int(loc_agg["n_stops"].max()) if not loc_agg.empty else 1
             for r in loc_agg.itertuples(index=False):
-                radius = 4 + 8 * (int(r.n_unieke_wagens) / max(max_w, 1))
+                radius = 4 + 8 * (int(r.n_stops) / max(max_s, 1))
                 popup = folium.Popup(
                     html=(
                         f"<b>{r.locatie_naam or '(onbekend)'}</b><br>"
                         f"{r.adres or ''}<br>"
-                        f"🚛 <b>{int(r.n_unieke_wagens)} unieke wagens</b><br>"
-                        f"📍 {int(r.n_stops):,} stops · {int(r.n_trips):,} trips<br>"
+                        f"📍 <b>{int(r.n_stops):,} stops</b> · "
+                        f"{int(r.n_trips):,} unieke trips<br>"
+                        f"🚛 {int(r.n_unieke_wagens)} unieke wagens<br>"
                         f"⏱️ Gem. rijduur ernaartoe: {r.gem_rijduur_min:.0f} min"
                     ).replace(",", "."),
                     max_width=300,
@@ -1421,7 +1421,7 @@ def main() -> None:
                     fill_opacity=0.6,
                     weight=1,
                     popup=popup,
-                    tooltip=f"{int(r.n_unieke_wagens)} unieke wagens",
+                    tooltip=f"{int(r.n_stops):,} stops".replace(",", "."),
                 ).add_to(cluster)
 
         routes: dict = {}
