@@ -1464,7 +1464,13 @@ def main() -> None:
                     radius=8,
                     blur=12,
                     min_opacity=0.35,
-                    gradient={"0.3": "#3b82f6", "0.6": "#f59e0b", "0.9": "#ef4444"},
+                    gradient={
+                        "0.05": "#1e3a8a",
+                        "0.2": "#3b82f6",
+                        "0.4": "#f59e0b",
+                        "0.65": "#dc2626",
+                        "1.0": "#7f1d1d",
+                    },
                 ).add_to(fmap)
             elif all_points:
                 max_n = int(max(p[2] for p in all_points))
@@ -1504,6 +1510,59 @@ def main() -> None:
                 f"🟢 Groene bliksem-markers = {len(chargers_df)} geverifieerde "
                 f"HDV-laadlocaties ≥ {charger_min_kw} kW. Klik op een marker voor details."
             )
+
+        legend_items = []
+        if show_heatmap:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#0000ff,#00ff00,#ffff00,#ff0000);'
+                 'display:inline-block;width:36px;height:10px;border-radius:2px;"></span>',
+                 "Stop-heatmap (alle stops, gewogen op rijduur)")
+            )
+        if show_markers:
+            legend_items.append(
+                ('<span style="display:inline-block;width:14px;height:14px;border-radius:50%;'
+                 'background:#1f77b4;border:1px solid #1f77b4;opacity:0.6;"></span>',
+                 "Drukste stop-locaties (cirkelgrootte = aantal wagens)")
+            )
+        if show_routes and use_road_routes:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#ddd6fe,#4c1d95);'
+                 'display:inline-block;width:36px;height:8px;border-radius:2px;"></span>',
+                 "Wegvlakken (top X%) — donkerder = meer unieke wagens")
+            )
+        elif show_routes:
+            legend_items.append(
+                ('<span style="background:#6b21a8;display:inline-block;width:36px;height:3px;"></span>',
+                 "Routelijnen (rechte lijnen tussen stops)")
+            )
+        if show_road_heatmap:
+            legend_items.append(
+                ('<span style="background:linear-gradient(90deg,#1e3a8a,#3b82f6,#f59e0b,#dc2626,#7f1d1d);'
+                 'display:inline-block;width:36px;height:10px;border-radius:2px;"></span>',
+                 "Wegvlak-heatmap (donkerrood = drukste corridors)")
+            )
+        if show_chargers and not chargers_df.empty:
+            legend_items.append(
+                ('<span style="color:#16a34a;font-size:14px;">⚡</span>',
+                 "Geverifieerde HDV-laadlocaties")
+            )
+
+        if legend_items:
+            legend_html = (
+                '<div style="position:fixed;bottom:30px;right:30px;z-index:9999;'
+                'background:rgba(255,255,255,0.95);border:1px solid #c9c8d3;'
+                'border-radius:10px;padding:10px 14px;font-family:Montserrat,Arial,sans-serif;'
+                'font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-width:340px;">'
+                '<div style="font-weight:600;color:#2e2343;margin-bottom:6px;">Legenda</div>'
+            )
+            for icon, label in legend_items:
+                legend_html += (
+                    f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">'
+                    f'{icon}<span style="color:#1a1a1f;">{label}</span></div>'
+                )
+            legend_html += "</div>"
+            fmap.get_root().html.add_child(folium.Element(legend_html))
+
         st_folium(fmap, height=620, use_container_width=True, returned_objects=[])
 
     with tab_dash:
