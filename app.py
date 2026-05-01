@@ -26,7 +26,11 @@ from src.data_loader import (
 )
 from src.geocoder import reverse_geocode
 from src.csv_loader import list_monthly_csvs, load_monthly_csvs
-from src.simulation import charge_hotspots, simulate_soc
+from src.simulation import (
+    analyze_charging_gaps,
+    charge_hotspots,
+    simulate_soc,
+)
 from src.summary_loader import load_trip_summaries
 from src.hotspots import rank_hotspots
 from src.road_usage import (
@@ -528,6 +532,199 @@ def _render_simulation(stops: pd.DataFrame) -> None:
         st.caption(
             f"Top 100 trips gerangschikt op aantal laad-events. "
             f"Totaal {n_trips:,} trips gesimuleerd.".replace(",", ".")
+        )
+
+    st.divider()
+    st.subheader("Laad-window analyse tussen shifts")
+    st.caption(
+        "Per truck: kijk per opeenvolgende trip-paar of de **rust-tijd "
+        "tussen shifts** voldoende is om de batterij voor de volgende "
+        "trip op te laden bij depot/thuis. Zo niet, dan moet er onderweg "
+        "**publiek** worden geladen."
+    )
+
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        gap_kwh_per_km = st.number_input(
+            "Verbruik (kWh/km)",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.19,
+            step=0.01,
+            key="gap_kwh_per_km",
+            help="Default 1.19 kWh/km (gemiddelde voor zware eTruck).",
+        )
+    with g2:
+        gap_charge_kw = st.number_input(
+            "Laadvermogen depot/thuis (kW)",
+            min_value=22,
+            max_value=600,
+            value=150,
+            step=22,
+            key="gap_charge_kw",
+            help="Maximaal vermogen dat op het depot beschikbaar is.",
+        )
+    with g3:
+        target_soc_pct = st.slider(
+            "Target SoC vóór trip (%)",
+            min_value=80,
+            max_value=100,
+            value=100,
+            step=5,
+            key="gap_target_soc",
+            help=(
+                "SoC waarmee de truck wil starten. Bij <100% rekent de "
+                "analyse minder benodigde lading."
+            ),
+        )
+
+    if stops.empty:
+        st.info("Geen trips beschikbaar.")
+        return
+
+    with st.spinner("Laad-windows berekenen..."):
+        gap_df = analyze_charging_gaps(
+            stops,
+            kwh_per_km=gap_kwh_per_km * (target_soc_pct / 100.0),
+            max_charge_kw=gap_charge_kw,
+        )
+
+    if gap_df.empty:
+        st.info("Geen trip-overgangen gevonden in de selectie.")
+        return
+
+    n_pairs = len(gap_df)
+    n_thuis = int(gap_df["thuis_voldoende"].sum())
+    n_publiek = n_pairs - n_thuis
+    pct_publiek = 100 * n_publiek / max(n_pairs, 1)
+    avg_gap = float(gap_df["gap_hours"].mean())
+    avg_tekort = float(gap_df.loc[~gap_df["thuis_voldoende"], "tekort_h"].mean()) \
+        if n_publiek else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(
+        "Trip-overgangen",
+        f"{n_pairs:,}".replace(",", "."),
+    )
+    m2.metric(
+        "Thuis voldoende",
+        f"{n_thuis:,}".replace(",", "."),
+        f"{100 - pct_publiek:.0f}%",
+    )
+    m3.metric(
+        "Publiek nodig",
+        f"{n_publiek:,}".replace(",", "."),
+        f"{pct_publiek:.0f}%",
+    )
+    m4.metric("Gem. rust-tijd", f"{avg_gap:.1f} u")
+
+    if n_publiek:
+        st.warning(
+            f"⚠️ {n_publiek:,} van de {n_pairs:,} trip-overgangen hebben "
+            f"**te weinig rust-tijd** voor volledige depot-lading "
+            f"(gem. tekort {avg_tekort:.1f} u). Deze trucks moeten onderweg "
+            "publiek laden of het laad-vermogen op het depot moet omhoog."
+            .replace(",", ".")
+        )
+
+    cd1, cd2 = st.columns([1, 1])
+    with cd1:
+        st.subheader("Verdeling rust-tijd")
+        try:
+            import altair as alt
+
+            hist = (
+                alt.Chart(
+                    gap_df.assign(
+                        bucket=pd.cut(
+                            gap_df["gap_hours"],
+                            bins=[0, 2, 4, 6, 8, 10, 12, 16, 24, 48, 999],
+                            labels=[
+                                "<2u",
+                                "2-4u",
+                                "4-6u",
+                                "6-8u",
+                                "8-10u",
+                                "10-12u",
+                                "12-16u",
+                                "16-24u",
+                                "24-48u",
+                                ">48u",
+                            ],
+                            include_lowest=True,
+                        ).astype(str)
+                    )
+                )
+                .mark_bar(color="#4c1d95")
+                .encode(
+                    x=alt.X("bucket:N", title="Rust-tijd"),
+                    y=alt.Y("count():Q", title="Aantal overgangen"),
+                    tooltip=[alt.Tooltip("count():Q", title="Aantal")],
+                )
+                .properties(height=240)
+            )
+            st.altair_chart(hist, use_container_width=True)
+        except Exception as e:
+            st.caption(f"Histogram niet beschikbaar: {e}")
+
+    with cd2:
+        st.subheader("Top 20 trucks met grootste tekort")
+        per_wagen = (
+            gap_df[~gap_df["thuis_voldoende"]]
+            .groupby("wagencode")
+            .agg(
+                tekort_uren=("tekort_h", "sum"),
+                aantal_keer=("tekort_h", "size"),
+                gem_tekort_h=("tekort_h", "mean"),
+            )
+            .reset_index()
+            .nlargest(20, "tekort_uren")
+        )
+        per_wagen["tekort_uren"] = per_wagen["tekort_uren"].round(1)
+        per_wagen["gem_tekort_h"] = per_wagen["gem_tekort_h"].round(1)
+        if per_wagen.empty:
+            st.info("Geen trucks met tekort.")
+        else:
+            st.dataframe(per_wagen, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("Detail per trip-overgang (top 100 grootste tekort)")
+    detail = (
+        gap_df[~gap_df["thuis_voldoende"]]
+        .nlargest(100, "tekort_h")
+        .copy()
+    )
+    if detail.empty:
+        st.caption("Geen overgangen met tekort.")
+    else:
+        detail["gap_hours"] = detail["gap_hours"].round(2)
+        detail["energy_kwh"] = detail["energy_kwh"].round(0)
+        detail["charge_time_h"] = detail["charge_time_h"].round(2)
+        detail["tekort_h"] = detail["tekort_h"].round(2)
+        detail["next_trip_km"] = detail["next_trip_km"].round(0)
+        st.dataframe(
+            detail[
+                [
+                    "wagencode",
+                    "trip_id",
+                    "trip_end",
+                    "next_trip_id",
+                    "next_trip_start",
+                    "gap_hours",
+                    "next_trip_km",
+                    "energy_kwh",
+                    "charge_time_h",
+                    "tekort_h",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "Download volledige laad-window-analyse als CSV",
+            data=gap_df.to_csv(index=False).encode("utf-8"),
+            file_name="laad_window_analyse.csv",
+            mime="text/csv",
         )
 
 

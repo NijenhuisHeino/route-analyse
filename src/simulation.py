@@ -95,6 +95,86 @@ def simulate_soc(
     return df
 
 
+def analyze_charging_gaps(
+    stops: pd.DataFrame,
+    kwh_per_km: float = 1.19,
+    max_charge_kw: float = 150,
+) -> pd.DataFrame:
+    """Voor elk paar opeenvolgende trips per truck: bereken rust-gap vs benodigde laadtijd.
+
+    Per truck worden trips chronologisch geordend. Voor elke trip-overgang:
+    - gap_hours = tijd tussen einde huidige trip en start volgende trip
+    - energy_kwh = afstand volgende trip × kWh/km
+    - charge_time_h = energy_kwh / max_charge_kw
+    - thuis_voldoende = gap_hours >= charge_time_h
+    - tekort_h = max(0, charge_time_h - gap_hours)
+
+    Onthult welk percentage trips publiek moet laden tijdens de rit.
+    """
+    if stops.empty:
+        return pd.DataFrame()
+
+    if "afstand_km_trip" in stops.columns:
+        trip_summary = (
+            stops.groupby(["wagencode", "trip_id"])
+            .agg(
+                trip_start=("gepland_start", "min"),
+                trip_end=("gepland_eind", "max"),
+                trip_km=("afstand_km_trip", "max"),
+                trip_date=("trip_date", "first"),
+            )
+            .reset_index()
+        )
+    else:
+        trip_summary = (
+            stops.groupby(["wagencode", "trip_id"])
+            .agg(
+                trip_start=("gepland_start", "min"),
+                trip_end=("gepland_eind", "max"),
+                trip_km=("afstand_km", "sum"),
+                trip_date=("trip_date", "first"),
+            )
+            .reset_index()
+        )
+
+    trip_summary = trip_summary.dropna(
+        subset=["trip_start", "trip_end", "trip_km"]
+    ).sort_values(["wagencode", "trip_start"]).reset_index(drop=True)
+
+    grp = trip_summary.groupby("wagencode", sort=False)
+    trip_summary["next_trip_start"] = grp["trip_start"].shift(-1)
+    trip_summary["next_trip_id"] = grp["trip_id"].shift(-1)
+    trip_summary["next_trip_km"] = grp["trip_km"].shift(-1)
+
+    df = trip_summary.dropna(
+        subset=["next_trip_start", "next_trip_id", "next_trip_km"]
+    ).copy()
+
+    df["gap_hours"] = (
+        (df["next_trip_start"] - df["trip_end"]).dt.total_seconds() / 3600
+    ).clip(lower=0)
+    df["energy_kwh"] = df["next_trip_km"] * kwh_per_km
+    df["charge_time_h"] = df["energy_kwh"] / max(max_charge_kw, 1)
+    df["thuis_voldoende"] = df["gap_hours"] >= df["charge_time_h"]
+    df["tekort_h"] = (df["charge_time_h"] - df["gap_hours"]).clip(lower=0)
+
+    return df[
+        [
+            "wagencode",
+            "trip_id",
+            "trip_end",
+            "next_trip_id",
+            "next_trip_start",
+            "gap_hours",
+            "next_trip_km",
+            "energy_kwh",
+            "charge_time_h",
+            "thuis_voldoende",
+            "tekort_h",
+        ]
+    ].reset_index(drop=True)
+
+
 def charge_hotspots(sim_df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
     """Aggregeer laad-events naar locaties: waar moeten trucks het vaakst laden?"""
     events = sim_df[sim_df["charge_event"]]
