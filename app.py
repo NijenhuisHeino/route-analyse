@@ -1246,6 +1246,9 @@ def _render_dashboard(
             st.error(f"Heatmap-render fout: {e}")
     else:
         st.caption("Geen `gepland_start` beschikbaar.")
+
+
+def _auto_restore_cache() -> None:
     """Als kritieke cache-bestanden ontbreken maar in Drive-backup staan, herstel."""
     import shutil
 
