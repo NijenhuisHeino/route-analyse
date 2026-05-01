@@ -811,7 +811,15 @@ def _render_dashboard(
     st.divider()
 
     # === Top stop-locaties ===
-    st.subheader("Top 50 stop-locaties (op aantal unieke wagens)")
+    sort_by_label = st.radio(
+        "Sorteren op",
+        options=["Aantal stops", "Aantal unieke wagens"],
+        index=0,
+        horizontal=True,
+        key="dash_sort_stops",
+    )
+    sort_col = "n_stops" if sort_by_label == "Aantal stops" else "n_wagens"
+    st.subheader(f"Top 50 stop-locaties (op {sort_by_label.lower()})")
     st.caption(
         "Geclusterd per ~110 m grid-cel — **Lat / Lon** zijn breedte- en "
         "lengtegraad van het centrum van die cel.  \n"
@@ -827,6 +835,9 @@ def _render_dashboard(
     hotspots = rank_hotspots(stops)
     if not chargers_df.empty:
         hotspots = add_nearest_charger_distance(hotspots, chargers_df)
+    hotspots = hotspots.sort_values(
+        [sort_col, "totale_standtijd_uur"], ascending=[False, False]
+    ).reset_index(drop=True)
     top_stops = hotspots.head(50).copy().reset_index(drop=True)
     top_stops.insert(0, "#", top_stops.index + 1)
     top_stops["maps"] = top_stops.apply(
