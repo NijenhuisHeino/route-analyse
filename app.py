@@ -334,6 +334,120 @@ def _load_chargers(min_power_kw: float) -> pd.DataFrame:
     return load_hdv_chargers(min_power_kw=min_power_kw)
 
 
+@st.cache_data(show_spinner=False)
+def _rank_hotspots_cached(stops: pd.DataFrame) -> pd.DataFrame:
+    return rank_hotspots(stops)
+
+
+@st.cache_data(show_spinner=False)
+def _unique_segments_cached(
+    stops: pd.DataFrame,
+) -> list[tuple[float, float, float, float]]:
+    return unique_segments(stops)
+
+
+@st.cache_data(show_spinner=False)
+def _load_cached_routes_for_segments(
+    segments: list[tuple[float, float, float, float]],
+) -> tuple[dict[tuple, list[tuple[float, float]]], int]:
+    return load_cached_routes(segments)
+
+
+@st.cache_data(show_spinner=False)
+def _simulate_soc_cached(
+    stops: pd.DataFrame,
+    kwh_per_km: float,
+    capacity_kwh: float,
+    start_soc_pct: float,
+    threshold_pct: float,
+    max_charge_kw: float,
+) -> pd.DataFrame:
+    return simulate_soc(
+        stops,
+        kwh_per_km=kwh_per_km,
+        capacity_kwh=capacity_kwh,
+        start_soc_pct=start_soc_pct,
+        threshold_pct=threshold_pct,
+        max_charge_kw=max_charge_kw,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _charge_hotspots_cached(sim_df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
+    return charge_hotspots(sim_df, top_n=top_n)
+
+
+@st.cache_data(show_spinner=False)
+def _per_trip_simulation_cached(sim_df: pd.DataFrame) -> pd.DataFrame:
+    per_trip = (
+        sim_df.groupby("trip_id")
+        .agg(
+            stops=("stop_seq", "size"),
+            trip_km=("segment_km", "sum"),
+            eind_soc_pct=("soc_pct_aankomst", "last"),
+            laad_events=("charge_event", "sum"),
+            laad_kwh=("charge_kwh", "sum"),
+            laad_min=("charge_min", "sum"),
+        )
+        .reset_index()
+    )
+    per_trip["trip_km"] = per_trip["trip_km"].round(1)
+    per_trip["laad_kwh"] = per_trip["laad_kwh"].round(0)
+    per_trip["laad_min"] = per_trip["laad_min"].round(0)
+    return per_trip.sort_values("laad_events", ascending=False).head(100)
+
+
+@st.cache_data(show_spinner=False)
+def _stop_heatmap_points_cached(
+    stops: pd.DataFrame,
+    aggregate_threshold: int,
+) -> tuple[list, int | None]:
+    if len(stops) > aggregate_threshold:
+        agg = (
+            stops.assign(
+                lat_b=stops["lat"].round(3),
+                lon_b=stops["lon"].round(3),
+            )
+            .groupby(["lat_b", "lon_b"], sort=False)
+            .agg(weight=("dwell_min", lambda s: max(s.sum(), 1)))
+            .reset_index()
+        )
+        return agg[["lat_b", "lon_b", "weight"]].values.tolist(), len(agg)
+    return stops[["lat", "lon", "dwell_min"]].values.tolist(), None
+
+
+@st.cache_data(show_spinner=False)
+def _marker_locations_cached(stops: pd.DataFrame, marker_top_n: int) -> pd.DataFrame:
+    return (
+        stops.groupby("adres", sort=False)
+        .agg(
+            lat=("lat", "first"),
+            lon=("lon", "first"),
+            locatie_naam=("locatie_naam", "first"),
+            n_unieke_wagens=("wagencode", "nunique"),
+            n_stops=("trip_id", "size"),
+            n_trips=("trip_id", "nunique"),
+            gem_rijduur_min=("dwell_min", "mean"),
+        )
+        .reset_index()
+        .nlargest(marker_top_n, "n_unieke_wagens")
+    )
+
+
+def _edges_df_to_edges(
+    edges_df: pd.DataFrame,
+) -> list[tuple[tuple[float, float], tuple[float, float], int, int]]:
+    return [
+        (
+            (float(r.lat1), float(r.lon1)),
+            (float(r.lat2), float(r.lon2)),
+            int(r.n_wagens),
+            int(r.n_passes),
+        )
+        for r in edges_df.itertuples(index=False)
+    ]
+
+
 def _persist_upload(uploaded_file) -> Path:
     """Save uploaded bytes to a deterministic tempfile path for cache reuse."""
     data = uploaded_file.getbuffer()
@@ -401,7 +515,7 @@ def _render_simulation(stops: pd.DataFrame) -> None:
         return
 
     with st.spinner("SoC-traject berekenen..."):
-        sim = simulate_soc(
+        sim = _simulate_soc_cached(
             stops,
             kwh_per_km=kwh_per_km,
             capacity_kwh=capacity,
@@ -440,7 +554,7 @@ def _render_simulation(stops: pd.DataFrame) -> None:
         st.caption(
             "Locaties waar trucks volgens deze simulatie het vaakst zouden moeten laden."
         )
-        hotspots = charge_hotspots(sim, top_n=50)
+        hotspots = _charge_hotspots_cached(sim, top_n=50)
         if hotspots.empty:
             st.info("Geen laad-events bij deze parameters.")
         else:
@@ -478,22 +592,7 @@ def _render_simulation(stops: pd.DataFrame) -> None:
 
     with col_right:
         st.subheader("Per-trip overzicht")
-        per_trip = (
-            sim.groupby("trip_id")
-            .agg(
-                stops=("stop_seq", "size"),
-                trip_km=("segment_km", "sum"),
-                eind_soc_pct=("soc_pct_aankomst", "last"),
-                laad_events=("charge_event", "sum"),
-                laad_kwh=("charge_kwh", "sum"),
-                laad_min=("charge_min", "sum"),
-            )
-            .reset_index()
-        )
-        per_trip["trip_km"] = per_trip["trip_km"].round(1)
-        per_trip["laad_kwh"] = per_trip["laad_kwh"].round(0)
-        per_trip["laad_min"] = per_trip["laad_min"].round(0)
-        per_trip = per_trip.sort_values("laad_events", ascending=False).head(100)
+        per_trip = _per_trip_simulation_cached(sim)
         st.dataframe(
             per_trip,
             use_container_width=True,
@@ -505,6 +604,7 @@ def _render_simulation(stops: pd.DataFrame) -> None:
         )
 
 
+@st.cache_data(show_spinner=False)
 def _build_excel_export(
     filters_info: dict,
     stops_df: pd.DataFrame,
@@ -546,6 +646,7 @@ _HOTSPOTS_COLUMN_LABELS = {
 
 def _render_dashboard(
     stops: pd.DataFrame,
+    base_df: pd.DataFrame,
     chargers_df: pd.DataFrame,
     road_threshold: int,
 ) -> None:
@@ -586,7 +687,7 @@ def _render_dashboard(
         "(hoog = trucks rijden lang om hier te komen — interessant voor laadinfra "
         "want accu komt hier vaak leeg aan)."
     )
-    hotspots = rank_hotspots(stops)
+    hotspots = _rank_hotspots_cached(stops)
     if not chargers_df.empty:
         hotspots = add_nearest_charger_distance(hotspots, chargers_df)
     top_stops = hotspots.head(50).copy()
@@ -625,17 +726,34 @@ def _render_dashboard(
         "Aaneengesloten wegvlakken boven de drempel worden samengevoegd tot "
         "één corridor. Drempel aanpassen via sidebar 'Min. aantal unieke wagens'."
     )
-    segs = unique_segments(stops)
-    cached_routes, missing = load_cached_routes(segs)
+    cache_variant = _detect_cache_variant(stops, base_df)
+    cached_edges_df = (
+        _load_cached_weighted_edges_df(cache_variant) if cache_variant else None
+    )
+    if cached_edges_df is not None and not cached_edges_df.empty:
+        edges = _edges_df_to_edges(cached_edges_df)
+        segs = []
+        cached_routes = {"__precomputed__": []}
+        missing = 0
+        st.caption(
+            f"⚡ {len(cached_edges_df):,} wegvlakken uit pre-compute cache "
+            f"(variant: {cache_variant})."
+            .replace(",", ".")
+        )
+    else:
+        edges = []
+        segs = _unique_segments_cached(stops)
+        cached_routes, missing = _load_cached_routes_for_segments(segs)
     corridors_df_export = pd.DataFrame()
     edges_df_export: pd.DataFrame | None = None
     if missing > 0 and not cached_routes:
         st.info(
             f"Wegvlak-data nog niet gecached ({missing}/{len(segs)} segmenten). "
-            "Zet op de Kaart-tab eenmalig **Routelijnen → volg wegennet** aan."
+            "Zet in de Kaart-weergave eenmalig **Routelijnen → volg wegennet** aan."
         )
     else:
-        edges = compute_weighted_edges(stops, cached_routes)
+        if cached_edges_df is None or cached_edges_df.empty:
+            edges = compute_weighted_edges(stops, cached_routes)
         if missing:
             st.caption(
                 f"⚠️ {missing}/{len(segs)} segmenten ontbreken in cache — "
@@ -665,7 +783,7 @@ def _render_dashboard(
                 )
                 weg = info["road"] or "(onbekend)"
                 plaats = info["town"] or ""
-                for p1, p2, _ in corridor["edges"]:
+                for p1, p2, *_ in corridor["edges"]:
                     folium.PolyLine(
                         [p1, p2], color="#dc2626", weight=5, opacity=0.85
                     ).add_to(mini)
@@ -1248,13 +1366,19 @@ def main() -> None:
         st.warning("Geen stops over na filtering. Pas filters aan.")
         return
 
-    tab_map, tab_dash, tab_sim = st.tabs(
-        ["🗺️ Kaart", "📊 Dashboard", "🔋 Simulatie"]
+    active_view = st.segmented_control(
+        "Weergave",
+        ["🗺️ Kaart", "📊 Dashboard", "🔋 Simulatie"],
+        default="🗺️ Kaart",
+        key="active_view",
     )
+    if active_view is None:
+        active_view = "🗺️ Kaart"
 
     chargers_df = pd.DataFrame()
     charger_error: str | None = None
-    if show_chargers:
+    needs_chargers = show_chargers and active_view in ("🗺️ Kaart", "📊 Dashboard")
+    if needs_chargers:
         try:
             chargers_df = _load_chargers(charger_min_kw)
             if charger_only_dedicated:
@@ -1280,48 +1404,29 @@ def main() -> None:
                     f"✅ {len(chargers_df)} HDV-laadlocaties geladen "
                     "(🟢 groene bliksem-markers op de kaart)."
                 )
+    elif show_chargers:
+        with st.sidebar:
+            st.caption("HDV-laadlocaties worden geladen op Kaart/Dashboard.")
 
-    with tab_map:
+    if active_view == "🗺️ Kaart":
         center = [stops["lat"].mean(), stops["lon"].mean()]
         fmap = folium.Map(location=center, zoom_start=8, tiles="OpenStreetMap")
 
         HEATMAP_AGG_THRESHOLD = 50_000
         if show_heatmap:
-            if len(stops) > HEATMAP_AGG_THRESHOLD:
-                agg = (
-                    stops.assign(
-                        lat_b=stops["lat"].round(3),
-                        lon_b=stops["lon"].round(3),
-                    )
-                    .groupby(["lat_b", "lon_b"], sort=False)
-                    .agg(weight=("dwell_min", lambda s: max(s.sum(), 1)))
-                    .reset_index()
-                )
-                heat_points = agg[["lat_b", "lon_b", "weight"]].values.tolist()
+            heat_points, n_agg_cells = _stop_heatmap_points_cached(
+                stops, HEATMAP_AGG_THRESHOLD
+            )
+            if n_agg_cells is not None:
                 st.caption(
-                    f"⚡ Heatmap geaggregeerd: {len(agg):,} cellen "
+                    f"⚡ Heatmap geaggregeerd: {n_agg_cells:,} cellen "
                     f"(uit {len(stops):,} stops, ~110 m grid)."
                     .replace(",", ".")
                 )
-            else:
-                heat_points = stops[["lat", "lon", "dwell_min"]].values.tolist()
             HeatMap(heat_points, radius=14, blur=20, min_opacity=0.3).add_to(fmap)
 
         if show_markers:
-            loc_agg = (
-                stops.groupby("adres", sort=False)
-                .agg(
-                    lat=("lat", "first"),
-                    lon=("lon", "first"),
-                    locatie_naam=("locatie_naam", "first"),
-                    n_unieke_wagens=("wagencode", "nunique"),
-                    n_stops=("trip_id", "size"),
-                    n_trips=("trip_id", "nunique"),
-                    gem_rijduur_min=("dwell_min", "mean"),
-                )
-                .reset_index()
-                .nlargest(marker_top_n, "n_unieke_wagens")
-            )
+            loc_agg = _marker_locations_cached(stops, marker_top_n)
             st.caption(
                 f"⚡ Top-{marker_top_n:,} drukste locaties getoond uit "
                 f"{stops['adres'].nunique():,} unieke adressen "
@@ -1356,8 +1461,8 @@ def main() -> None:
         routes: dict = {}
         need_osrm = (show_routes and use_road_routes) or show_road_heatmap
         if need_osrm:
-            segs = unique_segments(stops)
-            cached_routes, missing_n = load_cached_routes(segs)
+            segs = _unique_segments_cached(stops)
+            cached_routes, missing_n = _load_cached_routes_for_segments(segs)
             if missing_n == 0:
                 routes = cached_routes
             else:
@@ -1604,10 +1709,10 @@ def main() -> None:
 
         st_folium(fmap, height=620, use_container_width=True, returned_objects=[])
 
-    with tab_dash:
-        _render_dashboard(stops, chargers_df, road_threshold)
+    elif active_view == "📊 Dashboard":
+        _render_dashboard(stops, df, chargers_df, road_threshold)
 
-    with tab_sim:
+    else:
         _render_simulation(stops)
 
 

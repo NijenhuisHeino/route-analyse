@@ -1,0 +1,724 @@
+﻿@page "/fast"
+@implements IDisposable
+@inject RouteAnalysisService Analysis
+@inject IJSRuntime JS
+
+<PageTitle>PostNL Laadinfrastructuur Planner</PageTitle>
+
+<div class="fast-shell">
+    <aside class="fast-sidebar">
+        <div class="brand-block">
+            <div class="brand-mark">PN</div>
+            <div>
+                <h1>Laadinfrastructuur Planner</h1>
+                <p>Depot- en corridoranalyse</p>
+            </div>
+        </div>
+
+        <section class="filter-group">
+            <label>Vervoersvorm</label>
+            <div class="segmented">
+                <button class="@ModeClass("Alles")" @onclick='() => SetTransportMode("Alles")'>Alles</button>
+                <button class="@ModeClass("Eigen")" @onclick='() => SetTransportMode("Eigen")'>Eigen</button>
+                <button class="@ModeClass("Charter")" @onclick='() => SetTransportMode("Charter")'>Charter</button>
+            </div>
+        </section>
+
+        <section class="filter-grid">
+            <label>
+                Datum vanaf
+                <input type="date" value="@DateFromText" @onchange="e => DateFromText = e.Value?.ToString() ?? string.Empty" />
+            </label>
+            <label>
+                Datum tot
+                <input type="date" value="@DateToText" @onchange="e => DateToText = e.Value?.ToString() ?? string.Empty" />
+            </label>
+            <label>
+                Vervoerders
+                <input placeholder="namen scheiden met komma's" @bind="VervoerdersText" />
+            </label>
+            <label>
+                Voertuigen of kentekens
+                <input placeholder="wagen-codes of kentekens" @bind="WagencodesText" />
+            </label>
+            <label>
+                Min. stopduur (min)
+                <input type="number" min="0" max="180" step="5" @bind="MinDwellMin" />
+            </label>
+            <label>
+                Min. voertuigen per wegvlak
+                <input type="number" min="1" max="100" step="1" @bind="RoadThreshold" />
+            </label>
+        </section>
+
+        <section class="filter-group">
+            <label>Kaartlagen</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowStopHeat" /> Stopdrukte</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowMarkers" /> Toplocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowRoads" /> Wegvlakken</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" /> Wegdrukte</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Overnachtlocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowChargers" /> Laadlocaties</label>
+        </section>
+
+        <section class="filter-grid demand-controls">
+            <label>
+                Min. voertuigen per depot
+                <input type="number" min="1" max="100" step="1" @bind="MinDepotVehicles" />
+            </label>
+            <label>
+                kWh/km
+                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" />
+            </label>
+            <label>
+                Batterijcapaciteit (kWh)
+                <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" />
+            </label>
+            <label>
+                Doel laadniveau (%)
+                <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" />
+            </label>
+            <label>
+                Vermogen per stekker (kW)
+                <input type="number" min="50" max="2000" step="50" @bind="ScenarioKwPerPlug" />
+            </label>
+            <label>
+                Stekkers
+                <input type="number" min="1" max="100" step="1" @bind="ScenarioPlugs" />
+            </label>
+            <label>
+                Locatielimiet (MW)
+                <input type="number" min="0.05" max="50" step="0.1" @bind="ScenarioSiteLimitMw" />
+            </label>
+        </section>
+
+        <section class="filter-grid charger-controls">
+            <label>
+                Min. vermogen (kW)
+                <input type="number" min="0" max="400" step="50" @bind="ChargerMinPowerKw" />
+            </label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerOnlyDedicated" /> Alleen gereserveerd</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPublic" /> Publiek</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessSemiPublic" /> Semi-publiek</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPrivate" /> Privaat</label>
+        </section>
+
+        <button class="primary-action" @onclick="ApplyFiltersAsync" disabled="@IsBusy">
+            @(IsBusy ? "Bijwerken..." : "Analyse bijwerken")
+        </button>
+
+        @if (Metadata is not null)
+        {
+            <div class="cache-status">
+                <strong>Gegevens</strong>
+                <span>@(Metadata.DataAvailable ? Metadata.DataSource : "Ritgegevens niet beschikbaar")</span>
+                <span>@Metadata.StopCount.ToString("N0") stopmomenten</span>
+            </div>
+        }
+    </aside>
+
+    <main class="fast-main">
+        <header class="fast-header">
+            <div>
+                <p class="section-label">PostNL route-analyse</p>
+                <h2>Laadvraag per depot en druk wegvlak</h2>
+            </div>
+            <div class="header-status @(Metadata?.DataAvailable == true ? "ok" : "missing")">
+                @(Metadata?.DataAvailable == true ? "Gegevens geladen" : "Gegevens ontbreken")
+            </div>
+        </header>
+
+        @if (Metadata?.DataAvailable != true)
+        {
+            <section class="empty-state">
+                <h3>Geen ritgegevens gevonden</h3>
+                <p>Controleer of de ritbestanden en locatiegegevens beschikbaar zijn.</p>
+            </section>
+        }
+
+        <section class="metric-row">
+            <div class="metric"><span>Stopmomenten</span><strong>@FormatNumber(Summary?.Stops)</strong></div>
+            <div class="metric"><span>Dagritten</span><strong>@FormatNumber(Summary?.Trips)</strong></div>
+            <div class="metric"><span>Voertuigen</span><strong>@FormatNumber(Summary?.Wagens)</strong></div>
+            <div class="metric"><span>Totale km</span><strong>@FormatNumber(Summary?.TotalKm)</strong></div>
+            <div class="metric"><span>Stopduur (uur)</span><strong>@FormatNumber(Summary?.TotalDwellHours)</strong></div>
+        </section>
+
+        <section class="map-panel">
+            <div class="panel-heading">
+                <h3>Kaart</h3>
+                <span id="map-status">Klaar</span>
+            </div>
+            <div class="map-frame">
+                <div id="route-map" class="route-map"></div>
+                <aside class="map-legend" aria-label="Legenda kaartlagen">
+                    <div class="legend-heading">
+                        <strong>Legenda</strong>
+                        <span>Actieve lagen</span>
+                    </div>
+
+                    @if (ShowStopHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient stop-gradient"></span>
+                            <div>
+                                <strong>Stopdrukte</strong>
+                                <span>Blauw naar rood: van beperkte naar zeer hoge stopdrukte.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (ShowMarkers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol stop-marker"></span>
+                            <div>
+                                <strong>Toplocaties</strong>
+                                <span>Blauwe rondjes met witte rand; groter betekent meer voertuigen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (ShowChargers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol charger-marker"></span>
+                            <div>
+                                <strong>Laadlocaties</strong>
+                                <span>Groene rondjes met witte rand; groter betekent hoger vermogen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (ShowOvernight)
+                    {
+                        <div class="legend-item split">
+                            <span class="legend-symbol overnight-ok"></span>
+                            <span class="legend-symbol overnight-shortage"></span>
+                            <div>
+                                <strong>Overnachtlocaties</strong>
+                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (ShowRoads)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-line road-line"></span>
+                            <div>
+                                <strong>Wegvlakken</strong>
+                                <span>Paarse lijnen; donkerder en dikker betekent meer voertuigen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (ShowRoadHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient road-gradient"></span>
+                            <div>
+                                <strong>Wegdrukte</strong>
+                                <span>Blauw naar donkerrood: van lagere naar hogere passageconcentratie.</span>
+                            </div>
+                        </div>
+                    }
+                </aside>
+            </div>
+        </section>
+
+        @if (SelectedDetail is not null)
+        {
+            <section class="selection-panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>@SelectedDetail.Title</h3>
+                        <span>@(SelectedDetail.SelectionType == "road" ? "Wegvlakselectie" : "Overnachtlocatie")</span>
+                    </div>
+                    <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(SelectedDetail.Message))
+                {
+                    <p class="selection-message">@SelectedDetail.Message</p>
+                }
+
+                <div class="metric-row compact">
+                    <div class="metric"><span>Dagritten</span><strong>@FormatNumber(SelectedDetail.Summary.Trips)</strong></div>
+                    <div class="metric"><span>Voertuigen</span><strong>@FormatNumber(SelectedDetail.Summary.UniqueVehicles)</strong></div>
+                    <div class="metric"><span>Energievraag (MWh)</span><strong>@FormatNumber(SelectedDetail.Charging.TotalMwh)</strong></div>
+                    <div class="metric"><span>Tekort (MWh)</span><strong>@FormatNumber(SelectedDetail.Charging.ShortageMwh)</strong></div>
+                </div>
+
+                <div class="selection-grid">
+                    <div class="analysis-card">
+                        <div class="card-heading">
+                            <strong>Afstandsverdeling</strong>
+                            <span>P95 @SelectedDetail.Distribution.P95Km.ToString("N0") km</span>
+                        </div>
+                        <div class="histogram">
+                            @foreach (var bucket in SelectedDetail.Distribution.Buckets)
+                            {
+                                <div class="histogram-row">
+                                    <span>@bucket.FromKm.ToString("N0")-@bucket.ToKm.ToString("N0")</span>
+                                    <div><i style="width:@HistogramWidth(bucket.Trips, SelectedDetail.Distribution.Buckets)"></i></div>
+                                    <b>@bucket.Trips</b>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="analysis-card">
+                        <div class="card-heading">
+                            <strong>Laadprofiel</strong>
+                            <span>@SelectedDetail.Charging.Recommendation</span>
+                        </div>
+                        <div class="window-list">
+                            @foreach (var window in SelectedDetail.Charging.BusyWindows)
+                            {
+                                <div class="window-row">
+                                    <strong>@window.TimeSlot</strong>
+                                    <span>@window.DemandKwh.ToString("N0") kWh nodig</span>
+                                    <span>@window.ShortageKwh.ToString("N0") kWh tekort</span>
+                                    <span>@window.RequiredMw.ToString("N2") MW</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-panel nested-table">
+                    <div class="panel-heading">
+                        <h3>Voertuigen in selectie</h3>
+                        <span>@SelectedDetail.Vehicles.Length voertuigen</span>
+                    </div>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Wagen</th>
+                                    <th>Kenteken(s)</th>
+                                    <th>Dagritten</th>
+                                    <th>Km totaal</th>
+                                    <th>P95 km</th>
+                                    <th>MWh</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in SelectedDetail.Vehicles.Take(20))
+                                {
+                                    <tr>
+                                        <td><strong>@row.Wagencode</strong></td>
+                                        <td>@row.Kentekens</td>
+                                        <td>@row.Trips</td>
+                                        <td>@row.TotalKm.ToString("N0")</td>
+                                        <td>@row.P95Km.ToString("N0")</td>
+                                        <td>@row.TotalMwh.ToString("N1")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        }
+
+        <section class="content-grid">
+            <div class="table-panel">
+                <div class="panel-heading">
+                    <h3>Top stoplocaties</h3>
+                    <span>@(Dashboard?.TopStops.Length ?? 0) locaties</span>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Locatie</th>
+                                <th>Voertuigen</th>
+                                <th>Stops</th>
+                                <th>Ritten</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
+                                        <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
+                                    </td>
+                                    <td>@row.Wagens</td>
+                                    <td>@row.Stops</td>
+                                    <td>@row.Trips</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="table-panel">
+                <div class="panel-heading">
+                    <h3>Wegvlakken</h3>
+                    <span>@RoadStatusLabel(Dashboard?.RoadStatus)</span>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Segment</th>
+                                <th>Voertuigen</th>
+                                <th>Passages</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
+                            {
+                                <tr>
+                                    <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
+                                    <td>@row.UniqueWagens</td>
+                                    <td>@row.Passes</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="simulation-panel">
+            <div class="panel-heading">
+                <h3>Laadstrategie</h3>
+                <button @onclick="RunSimulationAsync" disabled="@IsBusy">Bereken laadniveau</button>
+            </div>
+            <div class="metric-row compact">
+                <div class="metric"><span>Laadmomenten</span><strong>@FormatNumber(Simulation?.ChargeEvents)</strong></div>
+                <div class="metric"><span>Ritten met laden</span><strong>@FormatNumber(Simulation?.TripsWithChargeEvent)</strong></div>
+                <div class="metric"><span>kWh</span><strong>@FormatNumber(Simulation?.TotalKwh)</strong></div>
+                <div class="metric"><span>Laaduren</span><strong>@FormatNumber(Simulation?.TotalChargeHours)</strong></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+@code {
+    private MetadataResponse? Metadata { get; set; }
+    private SummaryResponse? Summary { get; set; }
+    private DashboardResponse? Dashboard { get; set; }
+    private SimulationResponse? Simulation { get; set; }
+    private SelectionDetailResponse? SelectedDetail { get; set; }
+    private DotNetObjectReference<Home>? MapCallbacks { get; set; }
+    private bool IsBusy { get; set; }
+    private bool MapReady { get; set; }
+    private string? SelectedDepotId { get; set; }
+    private RoadSelection? SelectedRoad { get; set; }
+
+    private string TransportMode { get; set; } = "Alles";
+    private string DateFromText { get; set; } = "";
+    private string DateToText { get; set; } = "";
+    private string VervoerdersText { get; set; } = "";
+    private string WagencodesText { get; set; } = "";
+    private double MinDwellMin { get; set; }
+    private int RoadThreshold { get; set; } = 10;
+    private bool ShowStopHeat { get; set; } = true;
+    private bool ShowMarkers { get; set; } = true;
+    private bool ShowRoads { get; set; }
+    private bool ShowRoadHeat { get; set; }
+    private bool ShowOvernight { get; set; } = true;
+    private bool ShowChargers { get; set; } = true;
+    private int MinDepotVehicles { get; set; } = 5;
+    private double ScenarioKwhPerKm { get; set; } = 1.2;
+    private double ScenarioCapacityKwh { get; set; } = 590;
+    private double ScenarioTargetSocPct { get; set; } = 80;
+    private double ScenarioKwPerPlug { get; set; } = 350;
+    private int ScenarioPlugs { get; set; } = 4;
+    private double ScenarioSiteLimitMw { get; set; } = 1.4;
+    private double ChargerMinPowerKw { get; set; } = 150;
+    private bool ChargerOnlyDedicated { get; set; }
+    private bool ChargerAccessPublic { get; set; } = true;
+    private bool ChargerAccessSemiPublic { get; set; } = true;
+    private bool ChargerAccessPrivate { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Metadata = await Analysis.GetMetadataAsync();
+        if (Metadata.MinDate is not null)
+        {
+            DateFromText = Metadata.MinDate.Value.ToString("yyyy-MM-dd");
+        }
+
+        if (Metadata.MaxDate is not null)
+        {
+            DateToText = Metadata.MaxDate.Value.ToString("yyyy-MM-dd");
+        }
+
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            MapCallbacks = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("postnlFastMap.init", "route-map", MapCallbacks);
+            MapReady = true;
+            await RefreshMapAsync();
+        }
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        await LoadDataAsync();
+        await RefreshMapAsync();
+        await RefreshSelectedDetailAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            var filter = BuildFilter();
+            Summary = await Analysis.GetSummaryAsync(filter);
+            Dashboard = await Analysis.GetDashboardAsync(filter);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RunSimulationAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            var filter = BuildFilter();
+            Simulation = await Analysis.GetSimulationAsync(new SimulationRequest
+            {
+                DateFrom = filter.DateFrom,
+                DateTo = filter.DateTo,
+                VervoerderTypes = filter.VervoerderTypes,
+                Vervoerders = filter.Vervoerders,
+                Wagencodes = filter.Wagencodes,
+                MinDwellMin = filter.MinDwellMin,
+                RoadThreshold = filter.RoadThreshold,
+                RoadTopPercent = filter.RoadTopPercent,
+                MarkerTopN = filter.MarkerTopN
+            });
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        if (!MapReady)
+        {
+            return;
+        }
+
+        await JS.InvokeVoidAsync("postnlFastMap.update", BuildFilter(), BuildChargerFilter(), BuildOvernightFilter(), new
+        {
+            showStopHeat = ShowStopHeat,
+            showMarkers = ShowMarkers,
+            showRoads = ShowRoads,
+            showRoadHeat = ShowRoadHeat,
+            showOvernight = ShowOvernight,
+            showChargers = ShowChargers
+        });
+    }
+
+    private AnalysisFilter BuildFilter()
+    {
+        return new AnalysisFilter
+        {
+            DateFrom = ParseDate(DateFromText),
+            DateTo = ParseDate(DateToText),
+            VervoerderTypes = TransportMode switch
+            {
+                "Eigen" => ["eigen"],
+                "Charter" => ["charter"],
+                _ => []
+            },
+            Vervoerders = SplitList(VervoerdersText),
+            Wagencodes = SplitList(WagencodesText),
+            MinDwellMin = MinDwellMin,
+            RoadThreshold = RoadThreshold,
+            RoadTopPercent = 1,
+            MarkerTopN = 250
+        };
+    }
+
+    private ChargerFilter BuildChargerFilter()
+    {
+        var access = new List<string>();
+        if (ChargerAccessPublic)
+        {
+            access.Add("Publiek");
+        }
+
+        if (ChargerAccessSemiPublic)
+        {
+            access.Add("Semi-publiek");
+        }
+
+        if (ChargerAccessPrivate)
+        {
+            access.Add("Privaat");
+        }
+
+        return new ChargerFilter
+        {
+            MinPowerKw = ChargerMinPowerKw,
+            OnlyDedicated = ChargerOnlyDedicated,
+            Access = access.ToArray(),
+        };
+    }
+
+    private OvernightLocationsRequest BuildOvernightFilter()
+    {
+        var filter = BuildFilter();
+        return new OvernightLocationsRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            RoadThreshold = filter.RoadThreshold,
+            RoadTopPercent = filter.RoadTopPercent,
+            MarkerTopN = 100,
+            MinVehicles = MinDepotVehicles,
+            Scenario = BuildScenario()
+        };
+    }
+
+    private ChargingScenario BuildScenario()
+    {
+        return new ChargingScenario
+        {
+            KwhPerKm = ScenarioKwhPerKm,
+            CapacityKwh = ScenarioCapacityKwh,
+            MinSocPct = 15,
+            TargetSocPct = ScenarioTargetSocPct,
+            KwPerPlug = ScenarioKwPerPlug,
+            Plugs = ScenarioPlugs,
+            SiteLimitMw = ScenarioSiteLimitMw
+        };
+    }
+
+    [JSInvokable]
+    public async Task SelectDepotAsync(string depotId)
+    {
+        SelectedDepotId = depotId;
+        SelectedRoad = null;
+        await RefreshSelectedDetailAsync();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task SelectRoadAsync(double lat1, double lon1, double lat2, double lon2)
+    {
+        SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, 3);
+        SelectedDepotId = null;
+        await RefreshSelectedDetailAsync();
+        StateHasChanged();
+    }
+
+    private async Task RefreshSelectedDetailAsync()
+    {
+        if (SelectedDepotId is null && SelectedRoad is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var filter = BuildFilter();
+            if (SelectedDepotId is not null)
+            {
+                SelectedDetail = await Analysis.GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest
+                {
+                    DateFrom = filter.DateFrom,
+                    DateTo = filter.DateTo,
+                    VervoerderTypes = filter.VervoerderTypes,
+                    Vervoerders = filter.Vervoerders,
+                    Wagencodes = filter.Wagencodes,
+                    RoadThreshold = filter.RoadThreshold,
+                    RoadTopPercent = filter.RoadTopPercent,
+                    MarkerTopN = filter.MarkerTopN,
+                    DepotId = SelectedDepotId,
+                    Scenario = BuildScenario()
+                });
+            }
+            else if (SelectedRoad is not null)
+            {
+                SelectedDetail = await Analysis.GetRoadSelectionAsync(new RoadSelectionRequest
+                {
+                    DateFrom = filter.DateFrom,
+                    DateTo = filter.DateTo,
+                    VervoerderTypes = filter.VervoerderTypes,
+                    Vervoerders = filter.Vervoerders,
+                    Wagencodes = filter.Wagencodes,
+                    RoadThreshold = filter.RoadThreshold,
+                    RoadTopPercent = filter.RoadTopPercent,
+                    MarkerTopN = filter.MarkerTopN,
+                    Road = SelectedRoad,
+                    Scenario = BuildScenario()
+                });
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void SetTransportMode(string mode)
+    {
+        TransportMode = mode;
+    }
+
+    private string ModeClass(string mode) => TransportMode == mode ? "active" : "";
+
+    private static string RoadStatusLabel(string? status)
+    {
+        return status switch
+        {
+            "ok" => "Beschikbaar",
+            "skipped" => "Verborgen",
+            "cache_missing" => "Niet beschikbaar",
+            null or "" => "Niet beschikbaar",
+            _ => "Niet beschikbaar"
+        };
+    }
+
+    private static DateOnly? ParseDate(string value)
+    {
+        return DateOnly.TryParse(value, out var date) ? date : null;
+    }
+
+    private static string[] SplitList(string value)
+    {
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static string HistogramWidth(long trips, IReadOnlyCollection<DistanceBucket> buckets)
+    {
+        var max = buckets.Count == 0 ? 0 : buckets.Max(x => x.Trips);
+        var width = max <= 0 ? 0 : Math.Max(4, Math.Round(100.0 * trips / max, 1));
+        return width.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+    }
+
+    private static string FormatNumber(double? value) => value is null ? "-" : value.Value.ToString("N0");
+    private static string FormatNumber(long? value) => value is null ? "-" : value.Value.ToString("N0");
+
+    public void Dispose()
+    {
+        MapCallbacks?.Dispose();
+    }
+}

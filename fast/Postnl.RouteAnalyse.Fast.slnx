@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Postnl.RouteAnalyse.Fast.Tests/Postnl.RouteAnalyse.Fast.Tests.csproj" />
+  <Project Path="Postnl.RouteAnalyse.Fast/Postnl.RouteAnalyse.Fast.csproj" />
+</Solution>

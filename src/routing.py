@@ -75,14 +75,28 @@ def _fetch_one(lat1: float, lon1: float, lat2: float, lon2: float) -> list[tuple
 
 def unique_segments(stops: pd.DataFrame) -> list[tuple[float, float, float, float]]:
     """Extract unique consecutive (from, to) coordinate pairs across all trips."""
-    segs: set[tuple[float, float, float, float]] = set()
-    for _, g in stops.groupby(["wagencode", "trip_date", "trip_id"]):
-        if len(g) < 2:
-            continue
-        coords = g[["lat", "lon"]].values
-        for i in range(len(coords) - 1):
-            segs.add(_segment_key(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]))
-    return list(segs)
+    if stops.empty:
+        return []
+
+    df = stops.sort_values(
+        ["wagencode", "trip_date", "trip_id", "stop_seq"], kind="stable"
+    )
+    grp = df.groupby(["wagencode", "trip_date", "trip_id"], sort=False)
+    next_lat = grp["lat"].shift(-1)
+    next_lon = grp["lon"].shift(-1)
+
+    pairs = pd.DataFrame(
+        {
+            "lat1": df["lat"].round(ROUND_DECIMALS),
+            "lon1": df["lon"].round(ROUND_DECIMALS),
+            "lat2": next_lat.round(ROUND_DECIMALS),
+            "lon2": next_lon.round(ROUND_DECIMALS),
+        }
+    ).dropna(subset=["lat2", "lon2"])
+
+    if pairs.empty:
+        return []
+    return list(pairs.drop_duplicates().itertuples(index=False, name=None))
 
 
 def load_cached_routes(

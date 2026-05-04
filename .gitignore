@@ -14,11 +14,19 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+# .NET
+bin/
+obj/
+TestResults/
+.dotnet/
+*.user
+
 # Streamlit
 .streamlit/secrets.toml
 
 # Data (never commit PostNL trip data)
 data/
+.cache/
 *.xlsx
 *.xls
 *.csv
@@ -35,6 +43,7 @@ Thumbs.db
 
 # Conductor workspace context (kept local, not in repo)
 .context/
+.playwright-mcp/
 
 # Symlink naar Drive-backup (lokale konvenience, niet in repo)
 backups
