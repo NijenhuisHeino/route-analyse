@@ -8,7 +8,7 @@ public record AnalysisFilter
     public string[] Vervoerders { get; init; } = [];
     public string[] Wagencodes { get; init; } = [];
     public double MinDwellMin { get; init; }
-    public int RoadThreshold { get; init; } = 10;
+    public int RoadThreshold { get; init; } = 100;
     public int RoadTopPercent { get; init; } = 1;
     public int MarkerTopN { get; init; } = 250;
 }
@@ -171,6 +171,15 @@ public sealed record OvernightLocationsResponse(
 public sealed record OvernightLocationDetailRequest : AnalysisFilter
 {
     public string DepotId { get; init; } = "";
+    public ChargingScenario Scenario { get; init; } = new();
+}
+
+public sealed record StopLocationDetailRequest : AnalysisFilter
+{
+    public double Lat { get; init; }
+    public double Lon { get; init; }
+    public string? Label { get; init; }
+    public double RadiusKm { get; init; } = 0.5;
     public ChargingScenario Scenario { get; init; } = new();
 }
 

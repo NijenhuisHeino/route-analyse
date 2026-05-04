@@ -75,6 +75,17 @@ public sealed class PlannerApiEndpointTests : IDisposable
         });
         Assert.Equal("ok", roadDetail.Status);
         Assert.NotEmpty(roadDetail.Vehicles);
+
+        var stopDetail = await PostAsync<SelectionDetailResponse>(client, "/api/stops/location", new StopLocationDetailRequest
+        {
+            Lat = 52.000,
+            Lon = 5.000,
+            RadiusKm = 0.5,
+            Label = "Depot A"
+        });
+        Assert.Equal("ok", stopDetail.Status);
+        Assert.Equal("stop", stopDetail.SelectionType);
+        Assert.NotEmpty(stopDetail.HeatPoints);
     }
 
     public void Dispose()

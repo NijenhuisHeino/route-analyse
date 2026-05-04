@@ -216,6 +216,89 @@ public sealed partial class RouteAnalysisService
         });
     }
 
+    public async Task<SelectionDetailResponse> GetStopLocationDetailAsync(
+        StopLocationDetailRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await _store.EnsureReadyAsync(cancellationToken);
+        if (!_store.HasStops || !_store.HasView("overnight_events"))
+        {
+            return EmptySelection("cache_missing", "stop", null, "Vertrekheatmap is nog niet beschikbaar.", "Vertrekheatmap is nog niet beschikbaar.");
+        }
+
+        var normalized = NormalizeStopLocationDetailRequest(request);
+        var scenario = NormalizeScenario(normalized.Scenario);
+        var key = CacheKey("stop-location-detail", new { normalized, scenario });
+        return await GetOrCreateAsync(key, async () =>
+        {
+            using var connection = OpenConnection();
+            var where = BuildStopLocationWhere(normalized);
+
+            var rows = await QueryListAsync(
+                connection,
+                $$"""
+                SELECT
+                    CAST(wagencode AS VARCHAR) AS wagencode,
+                    COALESCE(CAST(kentekens AS VARCHAR), CAST(kenteken AS VARCHAR), '') AS kentekens,
+                    CAST(trip_date AS DATE) AS trip_date,
+                    CAST(trip_date AS VARCHAR) AS selection_id,
+                    CAST(prev_end_time AS TIMESTAMP) AS start_time,
+                    CAST(day_start AS TIMESTAMP) AS end_time,
+                    CAST(start_lat AS DOUBLE) AS lat,
+                    CAST(start_lon AS DOUBLE) AS lon,
+                    COALESCE(CAST(start_address AS VARCHAR), '') AS address,
+                    COALESCE(CAST(day_km AS DOUBLE), 0) AS distance_km,
+                    COALESCE(CAST(gap_hours AS DOUBLE), 0) AS gap_hours
+                FROM overnight_events
+                WHERE {{where}}
+                ORDER BY day_km DESC
+                LIMIT 50000;
+                """,
+                ReadDemandEvent,
+                cancellationToken);
+
+            var heat = await QueryListAsync(
+                connection,
+                $$"""
+                WITH selected_days AS (
+                    SELECT DISTINCT wagencode, trip_date
+                    FROM overnight_events
+                    WHERE {{where}}
+                )
+                SELECT
+                    ROUND(CAST(s.lat AS DOUBLE), 3) AS lat,
+                    ROUND(CAST(s.lon AS DOUBLE), 3) AS lon,
+                    COUNT(*) AS weight
+                FROM stops s
+                JOIN selected_days d
+                    ON CAST(s.wagencode AS VARCHAR) = d.wagencode
+                    AND CAST(s.trip_date AS DATE) = d.trip_date
+                WHERE s.lat IS NOT NULL
+                    AND s.lon IS NOT NULL
+                    AND NOT COALESCE(CAST(s.acties AS VARCHAR), '') ILIKE '%Administrative%'
+                GROUP BY 1, 2
+                ORDER BY weight DESC
+                LIMIT 20000;
+                """,
+                r => new HeatPoint(GetDouble(r, "lat"), GetDouble(r, "lon"), GetDouble(r, "weight")),
+                cancellationToken);
+
+            var title = string.IsNullOrWhiteSpace(normalized.Label)
+                ? $"Vertrekritten vanaf {normalized.Lat:0.000}, {normalized.Lon:0.000}"
+                : $"Vertrekritten vanaf {normalized.Label}";
+            return BuildSelectionDetail(
+                "stop",
+                $"{normalized.Lat:0.000}:{normalized.Lon:0.000}",
+                title,
+                normalized.Lat,
+                normalized.Lon,
+                rows,
+                heat,
+                scenario,
+                isRoadSelection: false);
+        });
+    }
+
     public async Task<SelectionDetailResponse> GetRoadSelectionAsync(
         RoadSelectionRequest request,
         CancellationToken cancellationToken = default)
@@ -735,6 +818,28 @@ public sealed partial class RouteAnalysisService
         };
     }
 
+    private StopLocationDetailRequest NormalizeStopLocationDetailRequest(StopLocationDetailRequest request)
+    {
+        var normalized = NormalizeFilter(request);
+        return request with
+        {
+            DateFrom = normalized.DateFrom,
+            DateTo = normalized.DateTo,
+            VervoerderTypes = normalized.VervoerderTypes,
+            Vervoerders = normalized.Vervoerders,
+            Wagencodes = normalized.Wagencodes,
+            MinDwellMin = normalized.MinDwellMin,
+            RoadThreshold = normalized.RoadThreshold,
+            RoadTopPercent = normalized.RoadTopPercent,
+            MarkerTopN = normalized.MarkerTopN,
+            Lat = Math.Clamp(request.Lat, -90, 90),
+            Lon = Math.Clamp(request.Lon, -180, 180),
+            Label = request.Label?.Trim(),
+            RadiusKm = Math.Clamp(request.RadiusKm, 0.1, 5),
+            Scenario = NormalizeScenario(request.Scenario),
+        };
+    }
+
     private RoadSelectionRequest NormalizeRoadSelectionRequest(RoadSelectionRequest request)
     {
         var normalized = NormalizeFilter(request);
@@ -804,6 +909,32 @@ public sealed partial class RouteAnalysisService
         AddIn(parts, "vervoerder_type", filter.VervoerderTypes);
         AddIn(parts, "vervoerder", filter.Vervoerders);
         AddVehicleIn(parts, filter.Wagencodes);
+        return string.Join(" AND ", parts);
+    }
+
+    private static string BuildStopLocationWhere(StopLocationDetailRequest request)
+    {
+        var parts = new List<string>
+        {
+            "day_km >= 0",
+            "start_lat IS NOT NULL",
+            "start_lon IS NOT NULL",
+            $"{HaversineSql("start_lat", "start_lon", SqlDouble(request.Lat), SqlDouble(request.Lon))} <= {SqlDouble(request.RadiusKm)}",
+        };
+
+        if (request.DateFrom is not null)
+        {
+            parts.Add($"trip_date >= DATE {DuckDbRouteStore.SqlString(request.DateFrom.Value.ToString("yyyy-MM-dd"))}");
+        }
+
+        if (request.DateTo is not null)
+        {
+            parts.Add($"trip_date <= DATE {DuckDbRouteStore.SqlString(request.DateTo.Value.ToString("yyyy-MM-dd"))}");
+        }
+
+        AddIn(parts, "vervoerder_type", request.VervoerderTypes);
+        AddIn(parts, "vervoerder", request.Vervoerders);
+        AddVehicleIn(parts, request.Wagencodes);
         return string.Join(" AND ", parts);
     }
 

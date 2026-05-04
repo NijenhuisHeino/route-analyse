@@ -46,8 +46,8 @@
                 <input type="number" min="0" max="180" step="5" @bind="MinDwellMin" />
             </label>
             <label>
-                Min. voertuigen per logisch wegvlak
-                <input type="number" min="1" max="100" step="1" @bind="RoadThreshold" />
+                Min. passages per wegvlak
+                <input type="number" min="1" max="1000000" step="50" @bind="RoadThreshold" />
             </label>
         </section>
 
@@ -59,6 +59,7 @@
             <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" /> Wegdrukte</label>
             <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Vaste stilstandlocaties</label>
             <label class="toggle"><input type="checkbox" @bind="ShowChargers" /> Laadlocaties</label>
+            <p class="hint-text">Wegvlakken zijn klikbare lijnsegmenten voor detailanalyse. Wegdrukte is een vloeiende heatmap van passages op het wegennet.</p>
         </section>
 
         <section class="filter-grid demand-controls">
@@ -225,7 +226,7 @@
                             <span class="legend-line road-line"></span>
                             <div>
                                 <strong>Wegvlakken</strong>
-                                <span>Paarse lijnen; samengevoegd per rijrichting en opgesplitst bij logische knooppunten.</span>
+                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
                             </div>
                         </div>
                     }
@@ -236,7 +237,18 @@
                             <span class="legend-gradient road-gradient"></span>
                             <div>
                                 <strong>Wegdrukte</strong>
-                                <span>Blauw naar donkerrood: van lagere naar hogere passageconcentratie.</span>
+                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (SelectedDetail?.SelectionType == "stop")
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient selection-gradient"></span>
+                            <div>
+                                <strong>Vertrekroutes</strong>
+                                <span>Groen naar rood: routes vanaf de gekozen stoplocatie na een vaste stilstandperiode.</span>
                             </div>
                         </div>
                     }
@@ -250,7 +262,7 @@
                 <div class="panel-heading">
                     <div>
                         <h3>@SelectedDetail.Title</h3>
-                        <span>@(SelectedDetail.SelectionType == "road" ? "Wegvlakselectie" : "Vaste stilstandlocatie")</span>
+                        <span>@SelectionTypeLabel(SelectedDetail.SelectionType)</span>
                     </div>
                     <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
                 </div>
@@ -461,6 +473,7 @@
     private bool MapReady { get; set; }
     private string? SelectedDepotId { get; set; }
     private RoadSelection? SelectedRoad { get; set; }
+    private StopLocationDetailRequest? SelectedStopLocation { get; set; }
     private int? SelectedDemandHour { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
@@ -469,7 +482,7 @@
     private string VervoerdersText { get; set; } = "";
     private string WagencodesText { get; set; } = "";
     private double MinDwellMin { get; set; }
-    private int RoadThreshold { get; set; } = 10;
+    private int RoadThreshold { get; set; } = 100;
     private bool ShowStopHeat { get; set; } = true;
     private bool ShowMarkers { get; set; } = true;
     private bool ShowRoads { get; set; }
@@ -531,7 +544,9 @@
         SelectedDetail = null;
         SelectedDepotId = null;
         SelectedRoad = null;
+        SelectedStopLocation = null;
         SelectedDemandHour = null;
+        await ClearSelectionHeatAsync();
 
         try
         {
@@ -691,6 +706,24 @@
     {
         SelectedDepotId = depotId;
         SelectedRoad = null;
+        SelectedStopLocation = null;
+        SelectedDemandHour = null;
+        await RefreshSelectedDetailAsync();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task SelectStopLocationAsync(double lat, double lon, string label)
+    {
+        SelectedStopLocation = new StopLocationDetailRequest
+        {
+            Lat = lat,
+            Lon = lon,
+            Label = label,
+            RadiusKm = 0.5
+        };
+        SelectedDepotId = null;
+        SelectedRoad = null;
         SelectedDemandHour = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
@@ -701,6 +734,7 @@
     {
         SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, radiusKm);
         SelectedDepotId = null;
+        SelectedStopLocation = null;
         SelectedDemandHour = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
@@ -708,8 +742,9 @@
 
     private async Task RefreshSelectedDetailAsync()
     {
-        if (SelectedDepotId is null && SelectedRoad is null)
+        if (SelectedDepotId is null && SelectedRoad is null && SelectedStopLocation is null)
         {
+            await ClearSelectionHeatAsync();
             return;
         }
 
@@ -738,6 +773,21 @@
                     .FirstOrDefault(x => x.RequiredKw > 0 || x.Vehicles > 0)
                     ?.Hour;
             }
+            else if (SelectedStopLocation is not null)
+            {
+                SelectedDetail = await Analysis.GetStopLocationDetailAsync(SelectedStopLocation with
+                {
+                    DateFrom = filter.DateFrom,
+                    DateTo = filter.DateTo,
+                    VervoerderTypes = filter.VervoerderTypes,
+                    Vervoerders = filter.Vervoerders,
+                    Wagencodes = filter.Wagencodes,
+                    RoadThreshold = filter.RoadThreshold,
+                    RoadTopPercent = filter.RoadTopPercent,
+                    MarkerTopN = filter.MarkerTopN,
+                    Scenario = BuildScenario()
+                });
+            }
             else if (SelectedRoad is not null)
             {
                 SelectedDetail = await Analysis.GetRoadSelectionAsync(new RoadSelectionRequest
@@ -754,6 +804,15 @@
                     Scenario = BuildScenario()
                 });
             }
+
+            if (MapReady && SelectedDetail is not null && SelectedDetail.SelectionType == "stop")
+            {
+                await JS.InvokeVoidAsync("routePlannerMap.updateSelectionHeat", SelectedDetail.HeatPoints);
+            }
+            else
+            {
+                await ClearSelectionHeatAsync();
+            }
         }
         finally
         {
@@ -767,6 +826,24 @@
     }
 
     private string ModeClass(string mode) => TransportMode == mode ? "active" : "";
+
+    private static string SelectionTypeLabel(string selectionType)
+    {
+        return selectionType switch
+        {
+            "road" => "Wegvlakselectie",
+            "stop" => "Vertrekkende dagritten vanaf stoplocatie",
+            _ => "Vaste stilstandlocatie"
+        };
+    }
+
+    private async Task ClearSelectionHeatAsync()
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.clearSelectionHeat");
+        }
+    }
 
     private void SelectDemandHour(int hour)
     {

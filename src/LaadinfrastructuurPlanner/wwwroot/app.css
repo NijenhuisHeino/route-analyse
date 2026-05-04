@@ -130,6 +130,14 @@ td span,
   color: var(--eta-purple);
 }
 
+.hint-text {
+  margin: 10px 0 0;
+  color: var(--eta-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
 .filter-grid {
   display: grid;
   gap: 10px;
@@ -580,6 +588,10 @@ td span,
 
 .legend-gradient.road-gradient {
   background: linear-gradient(90deg, #3b82f6 0%, #dc2626 58%, #7f1d1d 100%);
+}
+
+.legend-gradient.selection-gradient {
+  background: linear-gradient(90deg, #22c55e 0%, #f9bc13 42%, #f97316 68%, #dc2626 100%);
 }
 
 .charger-popup {

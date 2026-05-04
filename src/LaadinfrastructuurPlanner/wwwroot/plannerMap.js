@@ -52,7 +52,8 @@ window.routePlannerMap = (() => {
         type: "Feature",
         properties: {
           segmentId: line.segmentId || "",
-          weight: line.uniqueWagens || 1,
+          weight: line.passes || line.uniqueWagens || 1,
+          vehicles: line.uniqueWagens || 1,
           passes: line.passes || 0,
           direction: line.direction || "",
           bearing: line.bearing || 0,
@@ -116,6 +117,7 @@ window.routePlannerMap = (() => {
 
   function addLayers() {
     ensureSource("stop-heat");
+    ensureSource("selection-heat");
     ensureSource("stop-markers");
     ensureSource("road-lines");
     ensureSource("road-heat");
@@ -151,6 +153,36 @@ window.routePlannerMap = (() => {
       });
     }
 
+    if (!map.getLayer("selection-heat")) {
+      map.addLayer({
+        id: "selection-heat",
+        type: "heatmap",
+        source: "selection-heat",
+        paint: {
+          "heatmap-weight": ["interpolate", ["linear"], ["get", "weight"], 1, 0.2, 250, 1],
+          "heatmap-intensity": 1.1,
+          "heatmap-radius": 19,
+          "heatmap-opacity": 0.78,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(20,83,45,0)",
+            0.25,
+            "#22c55e",
+            0.5,
+            "#f9bc13",
+            0.75,
+            "#f97316",
+            1,
+            "#dc2626"
+          ]
+        },
+        layout: { visibility: "none" }
+      });
+    }
+
     if (!map.getLayer("road-heat")) {
       map.addLayer({
         id: "road-heat",
@@ -175,6 +207,20 @@ window.routePlannerMap = (() => {
           ]
         }
       });
+
+      map.on("click", "stop-markers", (event) => {
+        const feature = event.features?.[0];
+        const coords = feature?.geometry?.coordinates;
+        if (!coords || !dotNetRef) return;
+        dotNetRef.invokeMethodAsync(
+          "SelectStopLocationAsync",
+          Number(coords[1]),
+          Number(coords[0]),
+          String(feature.properties?.label || "")
+        );
+      });
+      map.on("mouseenter", "stop-markers", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "stop-markers", () => { map.getCanvas().style.cursor = ""; });
     }
 
     if (!map.getLayer("road-lines")) {
@@ -277,6 +323,10 @@ window.routePlannerMap = (() => {
       });
       map.on("mouseenter", "chargers", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "chargers", () => { map.getCanvas().style.cursor = ""; });
+    }
+
+    if (map.getLayer("selection-heat") && map.getLayer("stop-markers")) {
+      map.moveLayer("selection-heat", "stop-markers");
     }
   }
 
@@ -408,6 +458,19 @@ window.routePlannerMap = (() => {
       if (dotNetRef) {
         await dotNetRef.invokeMethodAsync("SelectRoadAsync", lat1, lon1, lat2, lon2, radiusKm);
       }
+    },
+
+    updateSelectionHeat: (points) => {
+      if (!map || !isStyleReady()) return;
+      addLayers();
+      setData("selection-heat", featureCollection(points || []));
+      setVisibility("selection-heat", (points || []).length > 0);
+    },
+
+    clearSelectionHeat: () => {
+      if (!map || !isStyleReady()) return;
+      setData("selection-heat", emptyFeatureCollection());
+      setVisibility("selection-heat", false);
     }
   };
 })();

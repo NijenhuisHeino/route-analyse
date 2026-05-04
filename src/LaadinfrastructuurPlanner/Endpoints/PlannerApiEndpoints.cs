@@ -31,6 +31,9 @@ public static class PlannerApiEndpoints
         api.MapPost("/overnight/location", ([FromBody] OvernightLocationDetailRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetOvernightLocationDetailAsync(request, cancellationToken));
 
+        api.MapPost("/stops/location", ([FromBody] StopLocationDetailRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetStopLocationDetailAsync(request, cancellationToken));
+
         api.MapPost("/roads/selection", ([FromBody] RoadSelectionRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetRoadSelectionAsync(request, cancellationToken));
 

@@ -306,7 +306,7 @@ public sealed partial class RouteAnalysisService
         var key = CacheKey("map-roads", new
         {
             Variant = variant,
-            Threshold = Math.Max(1, filter.RoadThreshold),
+            MinPassages = Math.Max(1, filter.RoadThreshold),
             TopPct = Math.Clamp(filter.RoadTopPercent, 1, 25),
             Mode = "logical-directional-v1",
         });
@@ -314,7 +314,8 @@ public sealed partial class RouteAnalysisService
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
-            var maxRows = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {edgeView} WHERE n_wagens >= {Math.Max(1, filter.RoadThreshold)};", cancellationToken);
+            var minPassages = Math.Max(1, filter.RoadThreshold);
+            var maxRows = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {edgeView} WHERE COALESCE(n_passes, n_wagens) >= {minPassages};", cancellationToken);
             var targetRows = Math.Clamp((int)Math.Ceiling(maxRows * Math.Clamp(filter.RoadTopPercent, 1, 25) / 100.0), 50, 10_000);
             var rawRows = Math.Clamp(targetRows * 8, 250, 80_000);
             var outputRows = Math.Clamp((int)Math.Ceiling(targetRows / 6.0), 50, 1_200);
@@ -323,8 +324,8 @@ public sealed partial class RouteAnalysisService
                 $$"""
                 SELECT lat1, lon1, lat2, lon2, CAST(n_wagens AS INTEGER) AS n_wagens, CAST(COALESCE(n_passes, n_wagens) AS INTEGER) AS n_passes
                 FROM {{edgeView}}
-                WHERE n_wagens >= {{Math.Max(1, filter.RoadThreshold)}}
-                ORDER BY n_wagens DESC, n_passes DESC
+                WHERE COALESCE(n_passes, n_wagens) >= {{minPassages}}
+                ORDER BY n_passes DESC, n_wagens DESC
                 LIMIT {{rawRows}};
                 """,
                 r => new RawRoadEdge(
@@ -340,14 +341,14 @@ public sealed partial class RouteAnalysisService
             var heat = _store.HasView(heatView)
                 ? await QueryListAsync(
                     connection,
-                    $"SELECT lat, lon, weight FROM {heatView} WHERE weight >= {Math.Max(1, filter.RoadThreshold)} ORDER BY weight DESC LIMIT 20000;",
+                    $"SELECT lat, lon, weight FROM {heatView} WHERE weight >= {minPassages} ORDER BY weight DESC LIMIT 20000;",
                     r => new HeatPoint(GetDouble(r, "lat"), GetDouble(r, "lon"), GetDouble(r, "weight")),
                     cancellationToken)
                 : [];
 
             var lines = BuildLogicalRoadLines(rawEdges)
-                .OrderByDescending(x => x.UniqueWagens)
-                .ThenByDescending(x => x.Passes)
+                .OrderByDescending(x => x.Passes)
+                .ThenByDescending(x => x.UniqueWagens)
                 .Take(outputRows)
                 .ToArray();
 
@@ -524,7 +525,7 @@ public sealed partial class RouteAnalysisService
             Vervoerders = NormalizeArray(filter.Vervoerders),
             Wagencodes = NormalizeArray(filter.Wagencodes),
             MinDwellMin = Math.Max(0, filter.MinDwellMin),
-            RoadThreshold = Math.Clamp(filter.RoadThreshold, 1, 100),
+            RoadThreshold = Math.Clamp(filter.RoadThreshold, 1, 1_000_000),
             RoadTopPercent = Math.Clamp(filter.RoadTopPercent, 1, 25),
             MarkerTopN = Math.Clamp(filter.MarkerTopN, 50, 5_000),
         };
@@ -538,7 +539,7 @@ public sealed partial class RouteAnalysisService
             Vervoerders = NormalizeArray(request.Vervoerders),
             Wagencodes = NormalizeArray(request.Wagencodes),
             MinDwellMin = Math.Max(0, request.MinDwellMin),
-            RoadThreshold = Math.Clamp(request.RoadThreshold, 1, 100),
+            RoadThreshold = Math.Clamp(request.RoadThreshold, 1, 1_000_000),
             RoadTopPercent = Math.Clamp(request.RoadTopPercent, 1, 25),
             MarkerTopN = Math.Clamp(request.MarkerTopN, 50, 5_000),
             KwhPerKm = Math.Clamp(request.KwhPerKm, 0.5, 3.0),
@@ -617,7 +618,7 @@ public sealed partial class RouteAnalysisService
 
         var visited = new HashSet<int>();
         var logical = new List<RoadLine>();
-        foreach (var edge in edges.OrderByDescending(x => x.UniqueWagens).ThenByDescending(x => x.Passes))
+        foreach (var edge in edges.OrderByDescending(x => x.Passes).ThenByDescending(x => x.UniqueWagens))
         {
             if (visited.Contains(edge.Index))
             {

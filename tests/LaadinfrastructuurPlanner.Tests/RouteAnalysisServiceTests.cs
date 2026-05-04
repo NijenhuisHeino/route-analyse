@@ -72,6 +72,24 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadMapFiltersLinesAndHeatByPassages()
+    {
+        var roads = await _service.GetRoadMapAsync(new AnalysisFilter { RoadThreshold = 6 });
+
+        Assert.Equal("ok", roads.Status);
+        var line = Assert.Single(roads.Lines);
+        Assert.Equal(7, line.Passes);
+        Assert.Equal(1, line.RawSegments);
+        Assert.Empty(roads.HeatPoints);
+
+        var hidden = await _service.GetRoadMapAsync(new AnalysisFilter { RoadThreshold = 8 });
+
+        Assert.Equal("ok", hidden.Status);
+        Assert.Empty(hidden.Lines);
+        Assert.Empty(hidden.HeatPoints);
+    }
+
+    [Fact]
     public async Task RoadMapRejectsCustomFiltersWithoutPrecompute()
     {
         var roads = await _service.GetRoadMapAsync(new AnalysisFilter { Wagencodes = ["W1"] });
@@ -156,6 +174,28 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(180, vehicle.AvgKwhPerDay);
         Assert.Equal(12, vehicle.AvgStandingHours);
         Assert.Equal(15, vehicle.RequiredKw);
+    }
+
+    [Fact]
+    public async Task StopLocationDetailUsesDepartureDaysAfterFixedStandingPeriod()
+    {
+        var detail = await _service.GetStopLocationDetailAsync(new StopLocationDetailRequest
+        {
+            Lat = 52.000,
+            Lon = 5.000,
+            RadiusKm = 0.5,
+            Label = "Depot A",
+            Scenario = new ChargingScenario { KwhPerKm = 1.0, CapacityKwh = 200, TargetSocPct = 80, MinSocPct = 15 }
+        });
+
+        Assert.Equal("ok", detail.Status);
+        Assert.Equal("stop", detail.SelectionType);
+        Assert.StartsWith("Vertrekritten vanaf Depot A", detail.Title, StringComparison.Ordinal);
+        Assert.Equal(1, detail.Summary.Trips);
+        Assert.Equal(180, detail.Distribution.P95Km);
+        Assert.NotEmpty(detail.HeatPoints);
+        Assert.Contains(detail.HeatPoints, point => point.Lat == 52.2 && point.Lon == 5.2);
+        Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 15);
     }
 
     [Fact]
