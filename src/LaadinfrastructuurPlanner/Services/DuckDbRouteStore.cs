@@ -313,7 +313,7 @@ public sealed class DuckDbRouteStore
 
         var payload = new
         {
-            Version = "charging-demand-v5-license-plates",
+            Version = "charging-demand-v6-fixed-depots",
             Sources = sourcePaths.Select(path =>
             {
                 var info = new FileInfo(path);
@@ -633,6 +633,7 @@ public sealed class DuckDbRouteStore
             WITH ordered AS (
                 SELECT
                     *,
+                    COALESCE(NULLIF(kenteken_norm, ''), wagencode) AS vehicle_key,
                     LAG(day_end) OVER (PARTITION BY wagencode ORDER BY trip_date) AS prev_end_time,
                     LAG(end_lat) OVER (PARTITION BY wagencode ORDER BY trip_date) AS prev_end_lat,
                     LAG(end_lon) OVER (PARTITION BY wagencode ORDER BY trip_date) AS prev_end_lon,
@@ -653,11 +654,38 @@ public sealed class DuckDbRouteStore
                 WHERE prev_end_time IS NOT NULL
                     AND prev_end_lat IS NOT NULL
                     AND prev_end_lon IS NOT NULL
+            ),
+            candidates AS (
+                SELECT *
+                FROM scored
+                WHERE gap_hours BETWEEN 6 AND 72
+                    AND end_start_km <= 0.5
+            ),
+            location_stats AS (
+                SELECT
+                    vehicle_key,
+                    depot_id,
+                    COUNT(*) AS events,
+                    MAX(trip_date) AS last_seen,
+                    COALESCE(quantile_cont(gap_hours, 0.5), 0) AS median_gap_hours
+                FROM candidates
+                GROUP BY vehicle_key, depot_id
+            ),
+            location_scores AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY vehicle_key
+                        ORDER BY events DESC, last_seen DESC, median_gap_hours DESC, depot_id
+                    ) AS rn
+                FROM location_stats
             )
-            SELECT *
-            FROM scored
-            WHERE gap_hours BETWEEN 6 AND 72
-                AND end_start_km <= 0.5;
+            SELECT c.*
+            FROM candidates c
+            JOIN location_scores s
+                ON c.vehicle_key = s.vehicle_key
+                AND c.depot_id = s.depot_id
+            WHERE s.rn = 1;
             """);
 
         Execute(connection,
@@ -669,11 +697,11 @@ public sealed class DuckDbRouteStore
                 AVG(start_lon) AS lon,
                 COALESCE(MODE(start_address), '') AS address,
                 COUNT(*) AS events,
-                COUNT(DISTINCT wagencode) AS unique_vehicles,
+                COUNT(DISTINCT vehicle_key) AS unique_vehicles,
                 COALESCE(quantile_cont(gap_hours, 0.5), 0) AS median_gap_hours,
                 COALESCE(quantile_cont(day_km, 0.95), 0) AS p95_day_km,
                 COALESCE(SUM(day_km), 0) AS total_day_km,
-                LEAST(1.0, COUNT(DISTINCT wagencode) / 25.0) * 0.6
+                LEAST(1.0, COUNT(DISTINCT vehicle_key) / 25.0) * 0.6
                     + LEAST(1.0, COUNT(*) / 100.0) * 0.4 AS confidence
             FROM overnight_events
             GROUP BY depot_id;

@@ -376,10 +376,10 @@ window.routePlannerMap = (() => {
 
         const notes = [];
         if (options.showChargers && chargers.status === "ok") notes.push(`${chargers.markers?.length || 0} laders`);
-        if (options.showOvernight && overnight.status === "ok") notes.push(`${overnight.locations?.length || 0} overnachtlocaties`);
+        if (options.showOvernight && overnight.status === "ok") notes.push(`${overnight.locations?.length || 0} vaste stilstandlocaties`);
         if (roads.status === "cache_missing") notes.push("weglaag niet beschikbaar");
         if (options.showChargers && chargers.status === "cache_missing") notes.push("laadlocaties niet beschikbaar");
-        if (options.showOvernight && overnight.status !== "ok") notes.push("overnachtlocaties niet beschikbaar");
+        if (options.showOvernight && overnight.status !== "ok") notes.push("vaste stilstandlocaties niet beschikbaar");
         status(notes.length ? `Kaart geladen · ${notes.join(" · ")}` : "Kaart geladen");
       } catch (error) {
         if (error.name !== "AbortError") {

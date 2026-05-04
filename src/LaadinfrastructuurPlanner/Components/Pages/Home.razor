@@ -57,7 +57,7 @@
             <label class="toggle"><input type="checkbox" @bind="ShowMarkers" /> Toplocaties</label>
             <label class="toggle"><input type="checkbox" @bind="ShowRoads" /> Wegvlakken</label>
             <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" /> Wegdrukte</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Overnachtlocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Vaste stilstandlocaties</label>
             <label class="toggle"><input type="checkbox" @bind="ShowChargers" /> Laadlocaties</label>
         </section>
 
@@ -213,7 +213,7 @@
                             <span class="legend-symbol overnight-ok"></span>
                             <span class="legend-symbol overnight-shortage"></span>
                             <div>
-                                <strong>Overnachtlocaties</strong>
+                                <strong>Vaste stilstandlocaties</strong>
                                 <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
                             </div>
                         </div>
@@ -250,7 +250,7 @@
                 <div class="panel-heading">
                     <div>
                         <h3>@SelectedDetail.Title</h3>
-                        <span>@(SelectedDetail.SelectionType == "road" ? "Wegvlakselectie" : "Overnachtlocatie")</span>
+                        <span>@(SelectedDetail.SelectionType == "road" ? "Wegvlakselectie" : "Vaste stilstandlocatie")</span>
                     </div>
                     <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
                 </div>
@@ -264,8 +264,32 @@
                     <div class="metric"><span>Dagritten</span><strong>@FormatNumber(SelectedDetail.Summary.Trips)</strong></div>
                     <div class="metric"><span>Voertuigen</span><strong>@FormatNumber(SelectedDetail.Summary.UniqueVehicles)</strong></div>
                     <div class="metric"><span>Energievraag (MWh)</span><strong>@FormatNumber(SelectedDetail.Charging.TotalMwh)</strong></div>
-                    <div class="metric"><span>Tekort (MWh)</span><strong>@FormatNumber(SelectedDetail.Charging.ShortageMwh)</strong></div>
+                    <div class="metric"><span>Piekvraag (MW)</span><strong>@SelectedDetail.Charging.PeakMw.ToString("N2")</strong></div>
                 </div>
+
+                @if (SelectedDetail.SelectionType == "depot")
+                {
+                    var selectedHour = SelectedHourCell();
+                    <div class="analysis-card hourly-card">
+                        <div class="card-heading">
+                            <strong>24-uurs bezetting en laadvraag</strong>
+                            <span>@(selectedHour is null ? "Geen stilstandvensters" : $"{selectedHour.Label} · {selectedHour.Vehicles:N0} voertuigen · {selectedHour.RequiredKw:N0} kW")</span>
+                        </div>
+                        <div class="hour-heatmap" aria-label="Uurprofiel laadvraag">
+                            @foreach (var hour in SelectedDetail.Charging.HourlyProfile)
+                            {
+                                <button class="@HourCellClass(hour)"
+                                        style="@HourCellStyle(hour)"
+                                        title="@($"{hour.Label}: {hour.Vehicles:N0} voertuigen, {hour.RequiredKw:N0} kW gevraagd")"
+                                        @onclick="() => SelectDemandHour(hour.Hour)">
+                                    <span>@hour.Label</span>
+                                    <strong>@hour.Vehicles</strong>
+                                    <em>@hour.RequiredKw.ToString("N0") kW</em>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
 
                 <div class="selection-grid">
                     <div class="analysis-card">
@@ -313,24 +337,26 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th>Wagen</th>
                                     <th>Kenteken(s)</th>
-                                    <th>Dagritten</th>
-                                    <th>Km totaal</th>
-                                    <th>P95 km</th>
-                                    <th>MWh</th>
+                                    <th>Voertuigcode</th>
+                                    <th>Dagen</th>
+                                    <th>Km/dag</th>
+                                    <th>kWh/dag</th>
+                                    <th>Uren op locatie</th>
+                                    <th>Benodigd kW</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach (var row in SelectedDetail.Vehicles.Take(20))
                                 {
                                     <tr>
-                                        <td><strong>@row.Wagencode</strong></td>
-                                        <td>@row.Kentekens</td>
-                                        <td>@row.Trips</td>
-                                        <td>@row.TotalKm.ToString("N0")</td>
-                                        <td>@row.P95Km.ToString("N0")</td>
-                                        <td>@row.TotalMwh.ToString("N1")</td>
+                                        <td><strong>@row.Kentekens</strong></td>
+                                        <td>@row.Wagencode</td>
+                                        <td>@row.Days</td>
+                                        <td>@row.AvgDayKm.ToString("N0")</td>
+                                        <td>@row.AvgKwhPerDay.ToString("N0")</td>
+                                        <td>@row.AvgStandingHours.ToString("N1")</td>
+                                        <td>@row.RequiredKw.ToString("N0")</td>
                                     </tr>
                                 }
                             </tbody>
@@ -431,6 +457,7 @@
     private bool MapReady { get; set; }
     private string? SelectedDepotId { get; set; }
     private RoadSelection? SelectedRoad { get; set; }
+    private int? SelectedDemandHour { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
     private string DateFromText { get; set; } = "";
@@ -500,6 +527,7 @@
         SelectedDetail = null;
         SelectedDepotId = null;
         SelectedRoad = null;
+        SelectedDemandHour = null;
 
         try
         {
@@ -659,6 +687,7 @@
     {
         SelectedDepotId = depotId;
         SelectedRoad = null;
+        SelectedDemandHour = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -668,6 +697,7 @@
     {
         SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, 3);
         SelectedDepotId = null;
+        SelectedDemandHour = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -698,6 +728,11 @@
                     DepotId = SelectedDepotId,
                     Scenario = BuildScenario()
                 });
+                SelectedDemandHour ??= SelectedDetail.Charging.HourlyProfile
+                    .OrderByDescending(x => x.RequiredKw)
+                    .ThenByDescending(x => x.Vehicles)
+                    .FirstOrDefault(x => x.RequiredKw > 0 || x.Vehicles > 0)
+                    ?.Hour;
             }
             else if (SelectedRoad is not null)
             {
@@ -728,6 +763,42 @@
     }
 
     private string ModeClass(string mode) => TransportMode == mode ? "active" : "";
+
+    private void SelectDemandHour(int hour)
+    {
+        SelectedDemandHour = hour;
+    }
+
+    private HourlyDemandCell? SelectedHourCell()
+    {
+        if (SelectedDetail is null || SelectedDetail.Charging.HourlyProfile.Length == 0)
+        {
+            return null;
+        }
+
+        var hour = SelectedDemandHour ?? SelectedDetail.Charging.HourlyProfile
+            .OrderByDescending(x => x.RequiredKw)
+            .ThenByDescending(x => x.Vehicles)
+            .FirstOrDefault()
+            ?.Hour;
+
+        return hour is null
+            ? null
+            : SelectedDetail.Charging.HourlyProfile.FirstOrDefault(x => x.Hour == hour.Value);
+    }
+
+    private string HourCellClass(HourlyDemandCell hour)
+    {
+        return SelectedDemandHour == hour.Hour ? "hour-cell active" : "hour-cell";
+    }
+
+    private string HourCellStyle(HourlyDemandCell hour)
+    {
+        var max = SelectedDetail?.Charging.HourlyProfile.Max(x => x.RequiredKw) ?? 0;
+        var intensity = max <= 0 ? 0 : Math.Clamp(hour.RequiredKw / max, 0, 1);
+        var alpha = 0.12 + 0.78 * intensity;
+        return $"--hour-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
 
     private static string RoadStatusLabel(string? status)
     {

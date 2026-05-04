@@ -209,11 +209,14 @@ public sealed record SelectionSummary(
 public sealed record SelectionVehicleRow(
     string Wagencode,
     string Kentekens,
-    long Trips,
+    long Days,
     double TotalKm,
+    double AvgDayKm,
     double P95Km,
+    double AvgKwhPerDay,
     double TotalMwh,
-    double AvgGapHours);
+    double AvgStandingHours,
+    double RequiredKw);
 
 public sealed record ChargingWindow(
     string TimeSlot,
@@ -223,6 +226,15 @@ public sealed record ChargingWindow(
     double ShortageKwh,
     double RequiredMw);
 
+public sealed record HourlyDemandCell(
+    int Hour,
+    string Label,
+    long Vehicles,
+    long Events,
+    double DemandKwh,
+    double RequiredKw,
+    double RequiredMw);
+
 public sealed record ChargingProfile(
     long Events,
     double TotalMwh,
@@ -230,6 +242,7 @@ public sealed record ChargingProfile(
     double PeakMw,
     int RequiredPlugsAtPeak,
     ChargingWindow[] BusyWindows,
+    HourlyDemandCell[] HourlyProfile,
     string Recommendation);
 
 public sealed record SelectionDetailResponse(

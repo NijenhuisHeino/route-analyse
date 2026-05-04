@@ -620,6 +620,11 @@ td span,
   box-shadow: none;
 }
 
+.analysis-card.hourly-card {
+  margin: 16px 16px 0;
+  padding: 14px 0 2px;
+}
+
 .card-heading {
   display: flex;
   align-items: flex-start;
@@ -644,6 +649,52 @@ td span,
 .window-list {
   display: grid;
   gap: 8px;
+}
+
+.hour-heatmap {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(44px, 1fr));
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.hour-cell {
+  min-width: 44px;
+  min-height: 82px;
+  margin: 0;
+  padding: 7px 5px;
+  border: 1px solid rgba(220, 38, 38, calc(var(--hour-alpha) + 0.05));
+  border-radius: 7px;
+  background: rgba(220, 38, 38, var(--hour-alpha));
+  color: var(--eta-purple);
+  cursor: pointer;
+  display: grid;
+  align-content: space-between;
+  justify-items: center;
+  box-shadow: none;
+}
+
+.hour-cell.active {
+  outline: 2px solid var(--eta-purple);
+  outline-offset: 1px;
+}
+
+.hour-cell span,
+.hour-cell em {
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.hour-cell strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.hour-cell em {
+  color: rgba(46, 35, 67, 0.72);
 }
 
 .histogram-row {

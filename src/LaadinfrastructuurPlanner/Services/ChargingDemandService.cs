@@ -55,6 +55,7 @@ public sealed partial class RouteAnalysisService
                         start_lon,
                         start_address,
                         wagencode,
+                        vehicle_key,
                         gap_hours,
                         day_km,
                         day_km * {{SqlDouble(scenario.KwhPerKm)}} AS demand_kwh,
@@ -79,7 +80,7 @@ public sealed partial class RouteAnalysisService
                         AVG(start_lon) AS lon,
                         COALESCE(MODE(start_address), '') AS address,
                         COUNT(*) AS events,
-                        COUNT(DISTINCT wagencode) AS unique_vehicles,
+                        COUNT(DISTINCT vehicle_key) AS unique_vehicles,
                         COALESCE(quantile_cont(gap_hours, 0.5), 0) AS median_gap_hours,
                         COALESCE(quantile_cont(day_km, 0.95), 0) AS p95_day_km,
                         COALESCE(SUM(demand_kwh), 0) / 1000.0 AS total_mwh,
@@ -155,8 +156,8 @@ public sealed partial class RouteAnalysisService
                     COALESCE(CAST(kentekens AS VARCHAR), CAST(kenteken AS VARCHAR), '') AS kentekens,
                     CAST(trip_date AS DATE) AS trip_date,
                     CAST(depot_id AS VARCHAR) AS selection_id,
-                    CAST(day_start AS TIMESTAMP) AS start_time,
-                    CAST(day_end AS TIMESTAMP) AS end_time,
+                    CAST(prev_end_time AS TIMESTAMP) AS start_time,
+                    CAST(day_start AS TIMESTAMP) AS end_time,
                     CAST(start_lat AS DOUBLE) AS lat,
                     CAST(start_lon AS DOUBLE) AS lon,
                     COALESCE(CAST(start_address AS VARCHAR), '') AS address,
@@ -350,19 +351,28 @@ public sealed partial class RouteAnalysisService
         var distribution = BuildDistanceDistribution(rows.Select(x => x.DistanceKm));
         var charging = BuildChargingProfile(rows, scenario, isRoadSelection);
         var vehicles = rows
-            .GroupBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(VehicleGroupKey, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
                 var distances = group.Select(x => x.DistanceKm).Order().ToArray();
                 var kentekens = CompactLicensePlates(group.SelectMany(x => SplitLicensePlates(x.Kentekens)));
+                var wagencodes = CompactValues(group.Select(x => x.Wagencode));
+                var demandPerDay = group.Select(x => Math.Max(0, x.DistanceKm * scenario.KwhPerKm)).ToArray();
+                var requiredKw = group
+                    .Select(x => RequiredKwForEvent(x, scenario, isRoadSelection))
+                    .Order()
+                    .ToArray();
                 return new SelectionVehicleRow(
-                    group.Key,
+                    wagencodes,
                     kentekens,
                     group.LongCount(),
                     Math.Round(group.Sum(x => x.DistanceKm), 1),
+                    Math.Round(group.Average(x => x.DistanceKm), 1),
                     Math.Round(QuantileSorted(distances, 0.95), 1),
+                    Math.Round(demandPerDay.Length == 0 ? 0 : demandPerDay.Average(), 1),
                     Math.Round(group.Sum(x => x.DistanceKm * scenario.KwhPerKm) / 1000.0, 2),
-                    Math.Round(group.Average(x => x.GapHours), 1));
+                    Math.Round(group.Average(x => x.GapHours), 1),
+                    Math.Round(QuantileSorted(requiredKw, 0.95), 0));
             })
             .OrderByDescending(x => x.TotalMwh)
             .ThenByDescending(x => x.P95Km)
@@ -371,7 +381,7 @@ public sealed partial class RouteAnalysisService
 
         var summary = new SelectionSummary(
             rows.LongCount(),
-            rows.Select(x => x.Wagencode).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
+            rows.Select(VehicleGroupKey).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
             Math.Round(rows.Sum(x => x.DistanceKm), 1),
             charging.TotalMwh,
             rows.Count == 0 ? 0 : Math.Round(rows.Average(x => x.GapHours), 1),
@@ -398,31 +408,9 @@ public sealed partial class RouteAnalysisService
         ChargingScenario scenario,
         bool isRoadSelection)
     {
-        var usableKwh = UsableKwh(scenario);
-        var eventLoads = rows.Select(row =>
-        {
-            var demandKwh = Math.Max(0, row.DistanceKm * scenario.KwhPerKm);
-            var localDemandKwh = isRoadSelection ? 0 : Math.Min(demandKwh, usableKwh);
-            var corridorDemandKwh = isRoadSelection ? demandKwh : Math.Max(0, demandKwh - usableKwh);
-            var deliverableKwh = isRoadSelection
-                ? 0
-                : Math.Min(localDemandKwh, Math.Min(
-                    row.GapHours * scenario.KwPerPlug * scenario.Plugs,
-                    row.GapHours * scenario.SiteLimitMw * 1000.0));
-            var shortageKwh = corridorDemandKwh + Math.Max(0, localDemandKwh - deliverableKwh);
-            var requiredKw = isRoadSelection
-                ? demandKwh
-                : row.GapHours > 0 ? localDemandKwh / row.GapHours : localDemandKwh;
-
-            return new
-            {
-                Slot = row.StartTime.ToString("HH:00", CultureInfo.InvariantCulture),
-                DemandKwh = demandKwh,
-                DeliverableKwh = deliverableKwh,
-                ShortageKwh = shortageKwh,
-                RequiredKw = requiredKw,
-            };
-        }).ToArray();
+        var eventLoads = rows
+            .Select(row => BuildEventLoad(row, scenario, isRoadSelection))
+            .ToArray();
 
         var windows = eventLoads
             .GroupBy(x => x.Slot)
@@ -438,9 +426,10 @@ public sealed partial class RouteAnalysisService
             .Take(12)
             .ToArray();
 
+        var hourlyProfile = BuildHourlyProfile(eventLoads);
         var totalMwh = eventLoads.Sum(x => x.DemandKwh) / 1000.0;
         var shortageMwh = eventLoads.Sum(x => x.ShortageKwh) / 1000.0;
-        var peakMw = windows.Length == 0 ? 0 : windows.Max(x => x.RequiredMw);
+        var peakMw = hourlyProfile.Length == 0 ? 0 : hourlyProfile.Max(x => x.RequiredMw);
         var plugsAtPeak = scenario.KwPerPlug <= 0 ? 0 : (int)Math.Ceiling(peakMw * 1000.0 / scenario.KwPerPlug);
 
         return new ChargingProfile(
@@ -450,7 +439,99 @@ public sealed partial class RouteAnalysisService
             Math.Round(peakMw, 2),
             plugsAtPeak,
             windows,
+            hourlyProfile,
             Recommend(totalMwh, shortageMwh, isRoadSelection));
+    }
+
+    private static DemandEventLoad BuildEventLoad(DemandEvent row, ChargingScenario scenario, bool isRoadSelection)
+    {
+        var demandKwh = Math.Max(0, row.DistanceKm * scenario.KwhPerKm);
+        var usableKwh = UsableKwh(scenario);
+        var localDemandKwh = isRoadSelection ? 0 : Math.Min(demandKwh, usableKwh);
+        var corridorDemandKwh = isRoadSelection ? demandKwh : Math.Max(0, demandKwh - usableKwh);
+        var deliverableKwh = isRoadSelection
+            ? 0
+            : Math.Min(localDemandKwh, Math.Min(
+                row.GapHours * scenario.KwPerPlug * scenario.Plugs,
+                row.GapHours * scenario.SiteLimitMw * 1000.0));
+        var shortageKwh = corridorDemandKwh + Math.Max(0, localDemandKwh - deliverableKwh);
+        var requiredKw = RequiredKwForEvent(row, scenario, isRoadSelection);
+        var slot = row.StartTime == DateTime.MinValue
+            ? "00:00"
+            : row.StartTime.ToString("HH:00", CultureInfo.InvariantCulture);
+
+        return new DemandEventLoad(row, slot, demandKwh, deliverableKwh, shortageKwh, requiredKw);
+    }
+
+    private static HourlyDemandCell[] BuildHourlyProfile(IReadOnlyList<DemandEventLoad> eventLoads)
+    {
+        var slots = new Dictionary<DateTime, HourAccumulator>();
+        foreach (var load in eventLoads)
+        {
+            if (load.Row.StartTime == DateTime.MinValue || load.Row.EndTime == DateTime.MinValue || load.Row.EndTime <= load.Row.StartTime)
+            {
+                continue;
+            }
+
+            var cursor = new DateTime(load.Row.StartTime.Year, load.Row.StartTime.Month, load.Row.StartTime.Day, load.Row.StartTime.Hour, 0, 0);
+            while (cursor < load.Row.EndTime)
+            {
+                var next = cursor.AddHours(1);
+                var overlapStart = load.Row.StartTime > cursor ? load.Row.StartTime : cursor;
+                var overlapEnd = load.Row.EndTime < next ? load.Row.EndTime : next;
+                var overlapHours = Math.Max(0, (overlapEnd - overlapStart).TotalHours);
+                if (overlapHours > 0)
+                {
+                    if (!slots.TryGetValue(cursor, out var accumulator))
+                    {
+                        accumulator = new HourAccumulator();
+                        slots[cursor] = accumulator;
+                    }
+
+                    accumulator.VehicleKeys.Add(VehicleGroupKey(load.Row));
+                    accumulator.Events++;
+                    accumulator.DemandKwh += load.RequiredKw * overlapHours;
+                    accumulator.RequiredKw += load.RequiredKw;
+                }
+
+                cursor = next;
+            }
+        }
+
+        var peakPerHour = slots
+            .Select(slot => new
+            {
+                Hour = slot.Key.Hour,
+                Vehicles = slot.Value.VehicleKeys.LongCount(),
+                slot.Value.Events,
+                slot.Value.DemandKwh,
+                slot.Value.RequiredKw,
+            })
+            .GroupBy(x => x.Hour)
+            .Select(group => group
+                .OrderByDescending(x => x.Vehicles)
+                .ThenByDescending(x => x.RequiredKw)
+                .First())
+            .ToDictionary(x => x.Hour);
+
+        return Enumerable.Range(0, 24)
+            .Select(hour =>
+            {
+                peakPerHour.TryGetValue(hour, out var peak);
+                var vehicles = peak?.Vehicles ?? 0;
+                var events = peak?.Events ?? 0;
+                var demandKwh = peak?.DemandKwh ?? 0;
+                var requiredKw = peak?.RequiredKw ?? 0;
+                return new HourlyDemandCell(
+                    hour,
+                    $"{hour:00}:00",
+                    vehicles,
+                    events,
+                    Math.Round(demandKwh, 0),
+                    Math.Round(requiredKw, 0),
+                    Math.Round(requiredKw / 1000.0, 2));
+            })
+            .ToArray();
     }
 
     private static DistanceDistribution BuildDistanceDistribution(IEnumerable<double> distances)
@@ -541,6 +622,45 @@ public sealed partial class RouteAnalysisService
             : string.Join(", ", visible) + $" +{values.Length - maxVisible}";
     }
 
+    private static string CompactValues(IEnumerable<string> values)
+    {
+        var clean = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (clean.Length == 0)
+        {
+            return "-";
+        }
+
+        const int maxVisible = 3;
+        var visible = clean.Take(maxVisible).ToArray();
+        return clean.Length <= maxVisible
+            ? string.Join(", ", visible)
+            : string.Join(", ", visible) + $" +{clean.Length - maxVisible}";
+    }
+
+    private static string VehicleGroupKey(DemandEvent row)
+    {
+        var license = SplitLicensePlates(row.Kentekens).FirstOrDefault();
+        return !string.IsNullOrWhiteSpace(license)
+            ? license
+            : row.Wagencode;
+    }
+
+    private static double RequiredKwForEvent(DemandEvent row, ChargingScenario scenario, bool isRoadSelection)
+    {
+        var demandKwh = Math.Max(0, row.DistanceKm * scenario.KwhPerKm);
+        if (isRoadSelection)
+        {
+            return demandKwh;
+        }
+
+        return row.GapHours > 0 ? demandKwh / row.GapHours : demandKwh;
+    }
+
     private static SelectionDetailResponse EmptySelection(
         string status,
         string selectionType,
@@ -560,7 +680,7 @@ public sealed partial class RouteAnalysisService
             new DistanceDistribution(0, 0, 0, 0, 0, 0, 0, []),
             [],
             [],
-            new ChargingProfile(0, 0, 0, 0, 0, [], message),
+            new ChargingProfile(0, 0, 0, 0, 0, [], [], message),
             false);
     }
 
@@ -809,4 +929,20 @@ public sealed partial class RouteAnalysisService
         string Address,
         double DistanceKm,
         double GapHours);
+
+    private sealed record DemandEventLoad(
+        DemandEvent Row,
+        string Slot,
+        double DemandKwh,
+        double DeliverableKwh,
+        double ShortageKwh,
+        double RequiredKw);
+
+    private sealed class HourAccumulator
+    {
+        public HashSet<string> VehicleKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public long Events { get; set; }
+        public double DemandKwh { get; set; }
+        public double RequiredKw { get; set; }
+    }
 }
