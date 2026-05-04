@@ -2,7 +2,7 @@
 .env
 .env.local
 
-# Python
+# Local environments and tool caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -13,16 +13,11 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# .NET
 bin/
 obj/
 TestResults/
 .dotnet/
 *.user
-
-# Streamlit
-.streamlit/secrets.toml
 
 # Data (never commit PostNL trip data)
 data/
@@ -31,7 +26,6 @@ data/
 *.xls
 *.csv
 *.parquet
-!requirements.txt
 
 # OS
 .DS_Store
@@ -45,5 +39,5 @@ Thumbs.db
 .context/
 .playwright-mcp/
 
-# Symlink naar Drive-backup (lokale konvenience, niet in repo)
+# Symlink naar Drive-backup (lokale verwijzing, niet in repo)
 backups

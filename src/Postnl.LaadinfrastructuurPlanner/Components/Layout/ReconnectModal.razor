@@ -1,0 +1,31 @@
+﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<dialog id="components-reconnect-modal" data-nosnippet>
+    <div class="components-reconnect-container">
+        <div class="components-rejoining-animation" aria-hidden="true">
+            <div></div>
+            <div></div>
+        </div>
+        <p class="components-reconnect-first-attempt-visible">
+            Verbinding herstellen...
+        </p>
+        <p class="components-reconnect-repeated-attempt-visible">
+            Herstellen lukt nog niet. Nieuwe poging over <span id="components-seconds-to-next-attempt"></span> seconden.
+        </p>
+        <p class="components-reconnect-failed-visible">
+            De verbinding is niet hersteld.<br />Probeer nogmaals of herlaad de pagina.
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
+            Nogmaals proberen
+        </button>
+        <p class="components-pause-visible">
+            De sessie is tijdelijk onderbroken.
+        </p>
+        <p class="components-resume-failed-visible">
+            De sessie kon niet worden hervat.<br />Probeer nogmaals of herlaad de pagina.
+        </p>
+        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
+            Hervatten
+        </button>
+    </div>
+</dialog>
