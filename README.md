@@ -37,6 +37,12 @@ ROUTE_ANALYSIS_EXTERNAL_CACHE_DIR=/pad/naar/cache-backup
 
 De productie-URL loopt achter Cloudflare Access. Gebruikers moeten eerst met e-mail inloggen voordat de planner of API bereikbaar is.
 
+Optioneel kan de app zelf ook een e-mailallowlist afdwingen:
+
+```bash
+ROUTE_ANALYSIS_ALLOWED_EMAILS=info@example.com
+```
+
 ## Testen
 
 ```bash
