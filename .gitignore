@@ -17,6 +17,7 @@ bin/
 obj/
 TestResults/
 .dotnet/
+.deploy/
 *.user
 
 # Data (never commit PostNL trip data)

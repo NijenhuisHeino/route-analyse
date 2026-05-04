@@ -31,8 +31,20 @@ POSTNL_ORIGINAL_CSV_DIR=/pad/naar/rittendata
 POSTNL_EXTERNAL_CACHE_DIR=/pad/naar/cache-backup
 ```
 
+Voor de vaste productie-service wordt alleen de lokale werkset gebruikt:
+
+```bash
+POSTNL_USE_DEFAULT_DATA_ROOT=false
+```
+
 ## Testen
 
 ```bash
 PATH="$HOME/.dotnet:$PATH" dotnet test Postnl.LaadinfrastructuurPlanner.slnx
+```
+
+## Publiceren
+
+```bash
+PATH="$HOME/.dotnet:$PATH" dotnet publish src/Postnl.LaadinfrastructuurPlanner -c Release -o .deploy/route-analyse
 ```
