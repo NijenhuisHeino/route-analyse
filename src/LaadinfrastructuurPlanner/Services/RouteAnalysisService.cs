@@ -13,6 +13,10 @@ public sealed partial class RouteAnalysisService
     private const int HeatAggregationThreshold = 50_000;
     private const long MaxDatasetFileBytes = 2L * 1024 * 1024 * 1024;
     private const double LogicalRoadMaxLengthKm = 8.0;
+    private const int MaxRoadTargetRows = 25_000;
+    private const int MaxRoadRawRows = 200_000;
+    private const int MaxRoadOutputRows = 4_000;
+    private const int MaxRoadHeatRows = 300_000;
     private static readonly JsonSerializerOptions CacheJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly DuckDbRouteStore _store;
     private readonly IMemoryCache _cache;
@@ -311,17 +315,18 @@ public sealed partial class RouteAnalysisService
             Variant = variant,
             MinPassages = Math.Max(1, filter.RoadThreshold),
             TopPct = Math.Clamp(filter.RoadTopPercent, 1, 25),
-            Mode = "logical-directional-v1",
+            Mode = "logical-directional-heat-percent-v2",
         });
 
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
             var minPassages = Math.Max(1, filter.RoadThreshold);
+            var topPercent = Math.Clamp(filter.RoadTopPercent, 1, 25);
             var maxRows = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {edgeView} WHERE COALESCE(n_passes, n_wagens) >= {minPassages};", cancellationToken);
-            var targetRows = Math.Clamp((int)Math.Ceiling(maxRows * Math.Clamp(filter.RoadTopPercent, 1, 25) / 100.0), 50, 10_000);
-            var rawRows = Math.Clamp(targetRows * 8, 250, 80_000);
-            var outputRows = Math.Clamp((int)Math.Ceiling(targetRows / 6.0), 50, 1_200);
+            var targetRows = Math.Clamp((int)Math.Ceiling(maxRows * topPercent / 100.0), 50, MaxRoadTargetRows);
+            var rawRows = Math.Clamp(targetRows * 8, 250, MaxRoadRawRows);
+            var outputRows = Math.Clamp((int)Math.Ceiling(targetRows / 6.0), 50, MaxRoadOutputRows);
             var rawEdges = await QueryListAsync(
                 connection,
                 $$"""
@@ -341,13 +346,19 @@ public sealed partial class RouteAnalysisService
                 cancellationToken);
 
             var heatView = $"road_heat_{variant}";
-            var heat = _store.HasView(heatView)
-                ? await QueryListAsync(
+            List<HeatPoint> heat = [];
+            if (_store.HasView(heatView))
+            {
+                var heatRows = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {heatView} WHERE weight >= {minPassages};", cancellationToken);
+                var targetHeatRows = heatRows <= 0
+                    ? 0
+                    : Math.Clamp((int)Math.Ceiling(heatRows * topPercent / 100.0), 1, MaxRoadHeatRows);
+                heat = await QueryListAsync(
                     connection,
-                    $"SELECT lat, lon, weight FROM {heatView} WHERE weight >= {minPassages} ORDER BY weight DESC LIMIT 20000;",
+                    $"SELECT lat, lon, weight FROM {heatView} WHERE weight >= {minPassages} ORDER BY weight DESC LIMIT {targetHeatRows};",
                     r => new HeatPoint(GetDouble(r, "lat"), GetDouble(r, "lon"), GetDouble(r, "weight")),
-                    cancellationToken)
-                : [];
+                    cancellationToken);
+            }
 
             var lines = BuildLogicalRoadLines(rawEdges)
                 .OrderByDescending(x => x.Passes)
