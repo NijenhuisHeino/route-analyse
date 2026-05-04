@@ -2,6 +2,7 @@ using LaadinfrastructuurPlanner.Components;
 using LaadinfrastructuurPlanner.Endpoints;
 using LaadinfrastructuurPlanner.Services;
 using Microsoft.AspNetCore.SignalR;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,15 +33,21 @@ app.Use(async (context, next) =>
         var email = context.Request.Headers["Cf-Access-Authenticated-User-Email"].ToString();
         if (string.IsNullOrWhiteSpace(email))
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync("Login vereist.");
+            await WriteAccessPageAsync(
+                context,
+                StatusCodes.Status401Unauthorized,
+                "Inloggen vereist",
+                "Je sessie is verlopen of je bent nog niet aangemeld.");
             return;
         }
 
         if (!allowedEmails.Contains(email.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsync("Geen toegang voor dit e-mailadres.");
+            await WriteAccessPageAsync(
+                context,
+                StatusCodes.Status403Forbidden,
+                "Geen toegang voor dit e-mailadres",
+                $"Je bent aangemeld met {email.Trim()}. Log uit en probeer opnieuw met een toegestaan e-mailadres.");
             return;
         }
     }
@@ -74,6 +81,91 @@ static bool RequiresAllowedEmail(HttpContext context, HashSet<string> allowedEma
     return !host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
         && !host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
         && !host.Equals("::1", StringComparison.OrdinalIgnoreCase);
+}
+
+static async Task WriteAccessPageAsync(HttpContext context, int statusCode, string title, string message)
+{
+    context.Response.StatusCode = statusCode;
+    context.Response.ContentType = "text/html; charset=utf-8";
+
+    var encodedTitle = WebUtility.HtmlEncode(title);
+    var encodedMessage = WebUtility.HtmlEncode(message);
+    await context.Response.WriteAsync(
+        $$"""
+        <!doctype html>
+        <html lang="nl">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>{{encodedTitle}}</title>
+            <style>
+                :root {
+                    color-scheme: light;
+                    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                    background: #f5f7fb;
+                    color: #21183f;
+                }
+
+                body {
+                    margin: 0;
+                    min-height: 100vh;
+                    display: grid;
+                    place-items: center;
+                    padding: 24px;
+                }
+
+                main {
+                    width: min(440px, 100%);
+                    background: white;
+                    border: 1px solid #dfe4ee;
+                    border-radius: 8px;
+                    box-shadow: 0 18px 45px rgba(20, 31, 56, 0.12);
+                    padding: 28px;
+                }
+
+                h1 {
+                    margin: 0 0 12px;
+                    font-size: 24px;
+                    line-height: 1.2;
+                }
+
+                p {
+                    margin: 0 0 22px;
+                    color: #5c6475;
+                    line-height: 1.5;
+                }
+
+                a {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 42px;
+                    padding: 0 16px;
+                    border-radius: 7px;
+                    background: #21183f;
+                    color: white;
+                    font-weight: 700;
+                    text-decoration: none;
+                }
+
+                small {
+                    display: block;
+                    margin-top: 16px;
+                    color: #778095;
+                    line-height: 1.45;
+                }
+            </style>
+        </head>
+        <body>
+            <main>
+                <h1>{{encodedTitle}}</h1>
+                <p>{{encodedMessage}}</p>
+                <a href="/cdn-cgi/access/logout">Opnieuw inloggen</a>
+                <small>Hiermee wordt je huidige Cloudflare-sessie afgesloten. Open daarna de app opnieuw en kies het juiste e-mailadres.</small>
+            </main>
+        </body>
+        </html>
+        """);
 }
 
 public partial class Program;
