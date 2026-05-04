@@ -85,13 +85,22 @@ public sealed record StopMapResponse(
     long SourceStops,
     bool FromCache);
 
+public sealed record RoadPoint(double Lat, double Lon);
+
 public sealed record RoadLine(
     double Lat1,
     double Lon1,
     double Lat2,
     double Lon2,
     int UniqueWagens,
-    int Passes);
+    int Passes,
+    string SegmentId = "",
+    string Direction = "",
+    double Bearing = 0,
+    double LengthKm = 0,
+    int RawSegments = 1,
+    double SelectionRadiusKm = 3,
+    RoadPoint[]? Coordinates = null);
 
 public sealed record RoadMapResponse(
     string Status,

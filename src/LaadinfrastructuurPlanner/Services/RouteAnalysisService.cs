@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Text.Json;
 using DuckDB.NET.Data;
 using Microsoft.AspNetCore.Components.Forms;
@@ -11,6 +12,7 @@ public sealed partial class RouteAnalysisService
 {
     private const int HeatAggregationThreshold = 50_000;
     private const long MaxDatasetFileBytes = 2L * 1024 * 1024 * 1024;
+    private const double LogicalRoadMaxLengthKm = 8.0;
     private static readonly JsonSerializerOptions CacheJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly DuckDbRouteStore _store;
     private readonly IMemoryCache _cache;
@@ -306,6 +308,7 @@ public sealed partial class RouteAnalysisService
             Variant = variant,
             Threshold = Math.Max(1, filter.RoadThreshold),
             TopPct = Math.Clamp(filter.RoadTopPercent, 1, 25),
+            Mode = "logical-directional-v1",
         });
 
         return await GetOrCreateAsync(key, async () =>
@@ -313,16 +316,18 @@ public sealed partial class RouteAnalysisService
             using var connection = OpenConnection();
             var maxRows = await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {edgeView} WHERE n_wagens >= {Math.Max(1, filter.RoadThreshold)};", cancellationToken);
             var targetRows = Math.Clamp((int)Math.Ceiling(maxRows * Math.Clamp(filter.RoadTopPercent, 1, 25) / 100.0), 50, 10_000);
-            var lines = await QueryListAsync(
+            var rawRows = Math.Clamp(targetRows * 8, 250, 80_000);
+            var outputRows = Math.Clamp((int)Math.Ceiling(targetRows / 6.0), 50, 1_200);
+            var rawEdges = await QueryListAsync(
                 connection,
                 $$"""
                 SELECT lat1, lon1, lat2, lon2, CAST(n_wagens AS INTEGER) AS n_wagens, CAST(COALESCE(n_passes, n_wagens) AS INTEGER) AS n_passes
                 FROM {{edgeView}}
                 WHERE n_wagens >= {{Math.Max(1, filter.RoadThreshold)}}
                 ORDER BY n_wagens DESC, n_passes DESC
-                LIMIT {{targetRows}};
+                LIMIT {{rawRows}};
                 """,
-                r => new RoadLine(
+                r => new RawRoadEdge(
                     GetDouble(r, "lat1"),
                     GetDouble(r, "lon1"),
                     GetDouble(r, "lat2"),
@@ -340,7 +345,13 @@ public sealed partial class RouteAnalysisService
                     cancellationToken)
                 : [];
 
-            return new RoadMapResponse("ok", variant, null, lines.ToArray(), heat.ToArray(), true);
+            var lines = BuildLogicalRoadLines(rawEdges)
+                .OrderByDescending(x => x.UniqueWagens)
+                .ThenByDescending(x => x.Passes)
+                .Take(outputRows)
+                .ToArray();
+
+            return new RoadMapResponse("ok", variant, null, lines, heat.ToArray(), true);
         });
     }
 
@@ -584,6 +595,268 @@ public sealed partial class RouteAnalysisService
             .Select((x, i) => x with { Rank = i + 1 })
             .ToArray();
     }
+
+    private static RoadLine[] BuildLogicalRoadLines(IReadOnlyList<RawRoadEdge> rawEdges)
+    {
+        var edges = rawEdges
+            .Where(edge => edge.Lat1 != edge.Lat2 || edge.Lon1 != edge.Lon2)
+            .Select((edge, index) => EnrichRoadEdge(edge, index))
+            .Where(edge => edge.LengthKm > 0)
+            .ToArray();
+        if (edges.Length == 0)
+        {
+            return [];
+        }
+
+        var outgoing = edges
+            .GroupBy(edge => RoadNodeKey(edge.DirectionBucket, edge.StartKey))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var incoming = edges
+            .GroupBy(edge => RoadNodeKey(edge.DirectionBucket, edge.EndKey))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        var visited = new HashSet<int>();
+        var logical = new List<RoadLine>();
+        foreach (var edge in edges.OrderByDescending(x => x.UniqueWagens).ThenByDescending(x => x.Passes))
+        {
+            if (visited.Contains(edge.Index))
+            {
+                continue;
+            }
+
+            var chain = BuildRoadChain(edge, incoming, outgoing, visited);
+            if (chain.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var segment in SplitRoadChain(chain, LogicalRoadMaxLengthKm))
+            {
+                logical.Add(ToRoadLine(segment));
+            }
+        }
+
+        return logical.ToArray();
+    }
+
+    private static List<PreparedRoadEdge> BuildRoadChain(
+        PreparedRoadEdge seed,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> incoming,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> outgoing,
+        HashSet<int> visited)
+    {
+        var chain = new LinkedList<PreparedRoadEdge>();
+        chain.AddLast(seed);
+        visited.Add(seed.Index);
+
+        ExtendBackward(chain, incoming, outgoing, visited);
+        ExtendForward(chain, incoming, outgoing, visited);
+        return chain.ToList();
+    }
+
+    private static void ExtendBackward(
+        LinkedList<PreparedRoadEdge> chain,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> incoming,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> outgoing,
+        HashSet<int> visited)
+    {
+        while (chain.First is not null)
+        {
+            var first = chain.First.Value;
+            var node = RoadNodeKey(first.DirectionBucket, first.StartKey);
+            if (!incoming.TryGetValue(node, out var inEdges)
+                || !outgoing.TryGetValue(node, out var outEdges)
+                || inEdges.Count != 1
+                || outEdges.Count != 1)
+            {
+                return;
+            }
+
+            var previous = inEdges[0];
+            if (visited.Contains(previous.Index) || previous.EndKey != first.StartKey)
+            {
+                return;
+            }
+
+            var currentLength = chain.Sum(x => x.LengthKm);
+            if (currentLength >= 1.0 && currentLength + previous.LengthKm > LogicalRoadMaxLengthKm)
+            {
+                return;
+            }
+
+            chain.AddFirst(previous);
+            visited.Add(previous.Index);
+        }
+    }
+
+    private static void ExtendForward(
+        LinkedList<PreparedRoadEdge> chain,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> incoming,
+        IReadOnlyDictionary<string, List<PreparedRoadEdge>> outgoing,
+        HashSet<int> visited)
+    {
+        while (chain.Last is not null)
+        {
+            var last = chain.Last.Value;
+            var node = RoadNodeKey(last.DirectionBucket, last.EndKey);
+            if (!incoming.TryGetValue(node, out var inEdges)
+                || !outgoing.TryGetValue(node, out var outEdges)
+                || inEdges.Count != 1
+                || outEdges.Count != 1)
+            {
+                return;
+            }
+
+            var next = outEdges[0];
+            if (visited.Contains(next.Index) || next.StartKey != last.EndKey)
+            {
+                return;
+            }
+
+            var currentLength = chain.Sum(x => x.LengthKm);
+            if (currentLength >= 1.0 && currentLength + next.LengthKm > LogicalRoadMaxLengthKm)
+            {
+                return;
+            }
+
+            chain.AddLast(next);
+            visited.Add(next.Index);
+        }
+    }
+
+    private static IEnumerable<IReadOnlyList<PreparedRoadEdge>> SplitRoadChain(
+        IReadOnlyList<PreparedRoadEdge> chain,
+        double maxLengthKm)
+    {
+        var current = new List<PreparedRoadEdge>();
+        var length = 0.0;
+        foreach (var edge in chain)
+        {
+            if (current.Count > 0 && length >= 1.0 && length + edge.LengthKm > maxLengthKm)
+            {
+                yield return current.ToArray();
+                current.Clear();
+                length = 0;
+            }
+
+            current.Add(edge);
+            length += edge.LengthKm;
+        }
+
+        if (current.Count > 0)
+        {
+            yield return current.ToArray();
+        }
+    }
+
+    private static RoadLine ToRoadLine(IReadOnlyList<PreparedRoadEdge> chain)
+    {
+        var points = new List<RoadPoint> { new(chain[0].Lat1, chain[0].Lon1) };
+        points.AddRange(chain.Select(edge => new RoadPoint(edge.Lat2, edge.Lon2)));
+        var simplified = SimplifyRoadPoints(points);
+        var lat1 = simplified[0].Lat;
+        var lon1 = simplified[0].Lon;
+        var lat2 = simplified[^1].Lat;
+        var lon2 = simplified[^1].Lon;
+        var bearing = BearingDegrees(lat1, lon1, lat2, lon2);
+        var lengthKm = Math.Round(chain.Sum(edge => edge.LengthKm), 2);
+        var midLat = Math.Round((lat1 + lat2) / 2, 3);
+        var midLon = Math.Round((lon1 + lon2) / 2, 3);
+        var segmentId = string.Create(
+            CultureInfo.InvariantCulture,
+            $"weg:{DirectionBucket(bearing)}:{midLat:0.000}:{midLon:0.000}:{chain.Count}");
+        return new RoadLine(
+            Math.Round(lat1, 6),
+            Math.Round(lon1, 6),
+            Math.Round(lat2, 6),
+            Math.Round(lon2, 6),
+            chain.Max(edge => edge.UniqueWagens),
+            chain.Max(edge => edge.Passes),
+            segmentId,
+            CompassDirection(bearing),
+            Math.Round(bearing, 0),
+            lengthKm,
+            chain.Count,
+            Math.Round(Math.Clamp(lengthKm / 2.0 + 1.5, 1.5, 20), 2),
+            simplified);
+    }
+
+    private static RoadPoint[] SimplifyRoadPoints(IReadOnlyList<RoadPoint> points)
+    {
+        if (points.Count <= 80)
+        {
+            return points.ToArray();
+        }
+
+        var step = Math.Max(1, (int)Math.Ceiling(points.Count / 78.0));
+        var result = new List<RoadPoint> { points[0] };
+        for (var i = step; i < points.Count - 1; i += step)
+        {
+            result.Add(points[i]);
+        }
+
+        result.Add(points[^1]);
+        return result.ToArray();
+    }
+
+    private static PreparedRoadEdge EnrichRoadEdge(RawRoadEdge edge, int index)
+    {
+        var bearing = BearingDegrees(edge.Lat1, edge.Lon1, edge.Lat2, edge.Lon2);
+        return new PreparedRoadEdge(
+            index,
+            edge.Lat1,
+            edge.Lon1,
+            edge.Lat2,
+            edge.Lon2,
+            edge.UniqueWagens,
+            edge.Passes,
+            Bearing: bearing,
+            DirectionBucket: DirectionBucket(bearing),
+            StartKey: CoordinateKey(edge.Lat1, edge.Lon1),
+            EndKey: CoordinateKey(edge.Lat2, edge.Lon2),
+            LengthKm: HaversineKm(edge.Lat1, edge.Lon1, edge.Lat2, edge.Lon2));
+    }
+
+    private static string CoordinateKey(double lat, double lon)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"{Math.Round(lat, 5):0.00000}:{Math.Round(lon, 5):0.00000}");
+    }
+
+    private static string RoadNodeKey(int bucket, string coordinateKey) => $"{bucket}|{coordinateKey}";
+
+    private static int DirectionBucket(double bearing)
+    {
+        return (int)Math.Floor(((bearing + 22.5) % 360) / 45.0);
+    }
+
+    private static string CompassDirection(double bearing)
+    {
+        return DirectionBucket(bearing) switch
+        {
+            0 => "richting noorden",
+            1 => "richting noordoosten",
+            2 => "richting oosten",
+            3 => "richting zuidoosten",
+            4 => "richting zuiden",
+            5 => "richting zuidwesten",
+            6 => "richting westen",
+            _ => "richting noordwesten",
+        };
+    }
+
+    private static double BearingDegrees(double lat1, double lon1, double lat2, double lon2)
+    {
+        var phi1 = DegreesToRadians(lat1);
+        var phi2 = DegreesToRadians(lat2);
+        var lambda1 = DegreesToRadians(lon1);
+        var lambda2 = DegreesToRadians(lon2);
+        var y = Math.Sin(lambda2 - lambda1) * Math.Cos(phi2);
+        var x = Math.Cos(phi1) * Math.Sin(phi2)
+            - Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(lambda2 - lambda1);
+        return (RadiansToDegrees(Math.Atan2(y, x)) + 360.0) % 360.0;
+    }
+
+    private static double RadiansToDegrees(double radians) => radians * 180.0 / Math.PI;
 
     private static SimulationResponse RunSimulation(IReadOnlyList<SimStop> stops, SimulationRequest request)
     {
@@ -1004,4 +1277,26 @@ public sealed partial class RouteAnalysisService
         double Lat,
         double Lon,
         string Address);
+
+    private sealed record RawRoadEdge(
+        double Lat1,
+        double Lon1,
+        double Lat2,
+        double Lon2,
+        int UniqueWagens,
+        int Passes);
+
+    private sealed record PreparedRoadEdge(
+        int Index,
+        double Lat1,
+        double Lon1,
+        double Lat2,
+        double Lon2,
+        int UniqueWagens,
+        int Passes,
+        double Bearing,
+        int DirectionBucket,
+        string StartKey,
+        string EndKey,
+        double LengthKm);
 }

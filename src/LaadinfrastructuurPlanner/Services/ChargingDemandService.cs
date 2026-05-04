@@ -286,10 +286,11 @@ public sealed partial class RouteAnalysisService
 
             var centerLat = (normalized.Road.Lat1 + normalized.Road.Lat2) / 2.0;
             var centerLon = (normalized.Road.Lon1 + normalized.Road.Lon2) / 2.0;
+            var direction = CompassDirection(BearingDegrees(normalized.Road.Lat1, normalized.Road.Lon1, normalized.Road.Lat2, normalized.Road.Lon2));
             return BuildSelectionDetail(
                 "road",
                 null,
-                $"Wegvlak {centerLat:0.000}, {centerLon:0.000}",
+                $"Wegvlak {direction} · {centerLat:0.000}, {centerLon:0.000}",
                 centerLat,
                 centerLon,
                 rows,

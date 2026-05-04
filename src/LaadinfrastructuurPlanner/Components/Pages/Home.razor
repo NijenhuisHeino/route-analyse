@@ -46,7 +46,7 @@
                 <input type="number" min="0" max="180" step="5" @bind="MinDwellMin" />
             </label>
             <label>
-                Min. voertuigen per wegvlak
+                Min. voertuigen per logisch wegvlak
                 <input type="number" min="1" max="100" step="1" @bind="RoadThreshold" />
             </label>
         </section>
@@ -225,7 +225,7 @@
                             <span class="legend-line road-line"></span>
                             <div>
                                 <strong>Wegvlakken</strong>
-                                <span>Paarse lijnen; donkerder en dikker betekent meer voertuigen.</span>
+                                <span>Paarse lijnen; samengevoegd per rijrichting en opgesplitst bij logische knooppunten.</span>
                             </div>
                         </div>
                     }
@@ -410,6 +410,8 @@
                         <thead>
                             <tr>
                                 <th>Segment</th>
+                                <th>Rijrichting</th>
+                                <th>Lengte</th>
                                 <th>Voertuigen</th>
                                 <th>Passages</th>
                             </tr>
@@ -419,6 +421,8 @@
                             {
                                 <tr>
                                     <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
+                                    <td>@row.Direction</td>
+                                    <td>@row.LengthKm.ToString("N1") km</td>
                                     <td>@row.UniqueWagens</td>
                                     <td>@row.Passes</td>
                                 </tr>
@@ -693,9 +697,9 @@
     }
 
     [JSInvokable]
-    public async Task SelectRoadAsync(double lat1, double lon1, double lat2, double lon2)
+    public async Task SelectRoadAsync(double lat1, double lon1, double lat2, double lon2, double radiusKm = 3)
     {
-        SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, 3);
+        SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, radiusKm);
         SelectedDepotId = null;
         SelectedDemandHour = null;
         await RefreshSelectedDetailAsync();

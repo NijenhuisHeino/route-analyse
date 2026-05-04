@@ -63,6 +63,12 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal("full", roads.Variant);
         Assert.NotEmpty(roads.Lines);
         Assert.NotEmpty(roads.HeatPoints);
+        var line = Assert.Single(roads.Lines);
+        Assert.Equal(2, line.RawSegments);
+        Assert.Contains("richting", line.Direction, StringComparison.OrdinalIgnoreCase);
+        Assert.True(line.LengthKm > 0);
+        Assert.NotNull(line.Coordinates);
+        Assert.True(line.Coordinates!.Length >= 3);
     }
 
     [Fact]

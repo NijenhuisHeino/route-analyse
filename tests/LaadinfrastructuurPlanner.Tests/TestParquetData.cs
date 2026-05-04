@@ -43,8 +43,8 @@ internal static class TestParquetData
             CREATE TABLE edges AS
             SELECT * FROM (
                 VALUES
-                (52.000, 5.000, 52.100, 5.100, 3, 7),
-                (52.100, 5.100, 52.200, 5.200, 2, 5)
+                (52.000, 5.000, 52.010, 5.010, 3, 7),
+                (52.010, 5.010, 52.020, 5.020, 2, 5)
             ) AS t(lat1, lon1, lat2, lon2, n_wagens, n_passes);
             CREATE TABLE heat AS
             SELECT * FROM (

@@ -51,15 +51,23 @@ window.routePlannerMap = (() => {
       features: (lines || []).map((line) => ({
         type: "Feature",
         properties: {
+          segmentId: line.segmentId || "",
           weight: line.uniqueWagens || 1,
-          passes: line.passes || 0
+          passes: line.passes || 0,
+          direction: line.direction || "",
+          bearing: line.bearing || 0,
+          lengthKm: line.lengthKm || 0,
+          rawSegments: line.rawSegments || 1,
+          radiusKm: line.selectionRadiusKm || 3
         },
         geometry: {
           type: "LineString",
-          coordinates: [
-            [line.lon1, line.lat1],
-            [line.lon2, line.lat2]
-          ]
+          coordinates: line.coordinates?.length
+            ? line.coordinates.map((point) => [point.lon, point.lat])
+            : [
+                [line.lon1, line.lat1],
+                [line.lon2, line.lat2]
+              ]
         }
       }))
     };
@@ -190,7 +198,8 @@ window.routePlannerMap = (() => {
           Number(coords[0][1]),
           Number(coords[0][0]),
           Number(coords[coords.length - 1][1]),
-          Number(coords[coords.length - 1][0])
+          Number(coords[coords.length - 1][0]),
+          Number(feature.properties?.radiusKm || 3)
         );
       });
       map.on("mouseenter", "road-lines", () => { map.getCanvas().style.cursor = "pointer"; });
@@ -395,9 +404,9 @@ window.routePlannerMap = (() => {
       }
     },
 
-    selectRoad: async (lat1, lon1, lat2, lon2) => {
+    selectRoad: async (lat1, lon1, lat2, lon2, radiusKm = 3) => {
       if (dotNetRef) {
-        await dotNetRef.invokeMethodAsync("SelectRoadAsync", lat1, lon1, lat2, lon2);
+        await dotNetRef.invokeMethodAsync("SelectRoadAsync", lat1, lon1, lat2, lon2, radiusKm);
       }
     }
   };
