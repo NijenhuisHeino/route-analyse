@@ -18,9 +18,9 @@
         <section class="filter-group">
             <label>Vervoersvorm</label>
             <div class="segmented">
-                <button class="@ModeClass("Alles")" @onclick='() => SetTransportMode("Alles")'>Alles</button>
-                <button class="@ModeClass("Eigen")" @onclick='() => SetTransportMode("Eigen")'>Eigen</button>
-                <button class="@ModeClass("Charter")" @onclick='() => SetTransportMode("Charter")'>Charter</button>
+                <button class="@ModeClass("Alles")" @onclick='() => SetTransportModeAsync("Alles")' disabled="@IsBusy">Alles</button>
+                <button class="@ModeClass("Eigen")" @onclick='() => SetTransportModeAsync("Eigen")' disabled="@IsBusy">Eigen</button>
+                <button class="@ModeClass("Charter")" @onclick='() => SetTransportModeAsync("Charter")' disabled="@IsBusy">Charter</button>
             </div>
         </section>
 
@@ -190,7 +190,7 @@
                 <div class="panel-heading">
                     <div>
                         <h3>24-uurs vermogensprofiel</h3>
-                        <span>Piekvraag per uur; klik op een cel voor voertuigen</span>
+                        <span>@PowerTransportLabel · klik op een cel voor voertuigen</span>
                     </div>
                     <button @onclick="LoadPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
                 </div>
@@ -918,7 +918,8 @@
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
             CapacityKwh = ScenarioCapacityKwh,
-            MaxVehicleKw = MaxVehicleKw
+            MaxVehicleKw = MaxVehicleKw,
+            VehicleClasses = PowerVehicleClasses()
         });
         PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
     }
@@ -939,7 +940,8 @@
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
             CapacityKwh = ScenarioCapacityKwh,
-            MaxVehicleKw = MaxVehicleKw
+            MaxVehicleKw = MaxVehicleKw,
+            VehicleClasses = PowerVehicleClasses()
         });
     }
 
@@ -1199,12 +1201,38 @@
         }
     }
 
-    private void SetTransportMode(string mode)
+    private async Task SetTransportModeAsync(string mode)
     {
+        if (TransportMode == mode || IsBusy)
+        {
+            return;
+        }
+
         TransportMode = mode;
+        SelectedDetail = null;
+        SelectedPowerProfile = null;
+        DemandPopup = null;
+        await ApplyFiltersAsync();
     }
 
     private string ModeClass(string mode) => TransportMode == mode ? "active" : "";
+
+    private string PowerTransportLabel => TransportMode switch
+    {
+        "Eigen" => "Alleen eigen vervoer",
+        "Charter" => "Alleen chartervervoer",
+        _ => "Alle voertuigen"
+    };
+
+    private string[] PowerVehicleClasses()
+    {
+        return TransportMode switch
+        {
+            "Eigen" => ["own"],
+            "Charter" => ["charter"],
+            _ => []
+        };
+    }
 
     private static string SelectionTypeLabel(string selectionType)
     {
