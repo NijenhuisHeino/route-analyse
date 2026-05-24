@@ -279,6 +279,103 @@ public sealed record ChargingProfile(
     WeeklyDemandCell[] WeeklyProfile,
     string Recommendation);
 
+public record PowerProfileRequest : AnalysisFilter
+{
+    public string[] VehicleClasses { get; init; } = [];
+    public int TopLocations { get; init; } = 5;
+    public int[] ScenarioYears { get; init; } = [];
+    public string ScenarioMode { get; init; } = "linear";
+}
+
+public sealed record PowerLocationProfileRequest : PowerProfileRequest
+{
+    public string LocationId { get; init; } = "";
+}
+
+public sealed record PowerHourlyCell(
+    int Hour,
+    string Label,
+    long Vehicles,
+    long Events,
+    double RequiredKw,
+    double RequiredMw);
+
+public sealed record PowerHeatmapCell(
+    string LocationId,
+    string LocationName,
+    int Hour,
+    long Vehicles,
+    double RequiredKw,
+    double RequiredMw);
+
+public sealed record PowerDailyMetric(
+    DateOnly Date,
+    long UniqueVehicles,
+    long OwnVehicles,
+    long CharterVehicles,
+    long Trips,
+    long Events,
+    double AvgDwellMin,
+    double PeakKw);
+
+public sealed record PowerLocationProfile(
+    string LocationId,
+    string Name,
+    string Address,
+    double Lat,
+    double Lon,
+    long UniqueVehicles,
+    long UniqueOwnVehicles,
+    long UniqueCharterVehicles,
+    long Trips,
+    long Events,
+    double AvgDwellMin,
+    double PeakKw,
+    PowerHourlyCell[] HourlyProfile);
+
+public sealed record PowerScenarioProfile(
+    int Year,
+    string Mode,
+    double ScaleFactor,
+    PowerHourlyCell[] HourlyProfile);
+
+public sealed record PowerProfileResponse(
+    string Status,
+    string? Message,
+    PowerLocationProfile[] Locations,
+    PowerHeatmapCell[] Heatmap,
+    PowerScenarioProfile[] Scenarios,
+    bool FromCache);
+
+public sealed record PowerLocationProfileResponse(
+    string Status,
+    string? Message,
+    PowerLocationProfile? Profile,
+    PowerDailyMetric[] DailyMetrics,
+    PowerScenarioProfile[] Scenarios,
+    bool FromCache);
+
+public sealed record VehicleClassCount(string VehicleClass, long Vehicles, long Events);
+
+public sealed record PowerDiagnosticsResponse(
+    string Status,
+    long TotalActions,
+    long ChargeWindowActions,
+    long MissingLocationActions,
+    long UnknownVehicleClassActions,
+    long RoutesWithoutWaitWindow,
+    long FleetVehicles,
+    long FleetVehiclesMatchedInRoutes,
+    VehicleClassCount[] VehicleClassCounts,
+    string[] Assumptions,
+    bool FromCache);
+
+public sealed record PowerReportExportResponse(
+    string Status,
+    string Message,
+    string OutputDirectory,
+    string[] Files);
+
 public sealed record SelectionDetailResponse(
     string Status,
     string SelectionType,
@@ -357,3 +454,37 @@ public sealed record SimulationResponse(
     SimulationHotspot[] Hotspots,
     TripSimulationSummary[] TripsTop,
     bool FromCache);
+
+public sealed record FleetVehicle(
+    string Vlootnummer,
+    string Kenteken,
+    string KentekenNorm,
+    string Regio,
+    string Opstapplaats,
+    string TypeLocatie,
+    string Merk,
+    string SoortVoertuig,
+    string SoortBrandstof,
+    long TripsInData,
+    double KmInData);
+
+public sealed record FleetDepot(
+    string DepotId,
+    string Name,
+    string Regio,
+    string TypeLocatie,
+    double Lat,
+    double Lon,
+    string GeocodeQuery,
+    string GeocodeSource,
+    long Vehicles,
+    long MatchedInTrips,
+    FleetVehicle[] VehicleList);
+
+public sealed record FleetDepotsResponse(
+    string Status,
+    string? Message,
+    string SourceLabel,
+    string Disclaimer,
+    long TotalVehicles,
+    FleetDepot[] Depots);

@@ -22,6 +22,7 @@ TestResults/
 
 # Data (never commit route or customer data)
 data/
+out/
 .cache/
 *.xlsx
 *.xls

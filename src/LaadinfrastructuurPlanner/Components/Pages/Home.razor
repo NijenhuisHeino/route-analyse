@@ -73,8 +73,13 @@
             <label class="toggle"><input type="checkbox" @bind="ShowRoads" /> Wegvlakken</label>
             <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" /> Wegdrukte</label>
             <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Vaste stilstandlocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowStandplaatsen" /> Standplaatsen (PostNL-wagenpark)</label>
             <label class="toggle"><input type="checkbox" @bind="ShowChargers" /> Laadlocaties</label>
             <p class="hint-text">Wegvlakken zijn klikbare lijnsegmenten voor detailanalyse. Wegdrukte is een vloeiende heatmap van passages op het wegennet.</p>
+            @if (ShowStandplaatsen)
+            {
+                <p class="hint-text disclaimer">Standplaatsen zijn ruw gegeocodeerd op plaatsnaam; markers kunnen afwijken van het werkelijke adres.</p>
+            }
         </section>
 
         <section class="filter-grid demand-controls">
@@ -176,6 +181,100 @@
             <div class="metric"><span>Totale km</span><strong>@FormatNumber(Summary?.TotalKm)</strong></div>
             <div class="metric"><span>Stopduur (uur)</span><strong>@FormatNumber(Summary?.TotalDwellHours)</strong></div>
         </section>
+
+        @if (PowerProfiles is not null)
+        {
+            <section class="table-panel power-profile-panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>24-uurs vermogensprofiel</h3>
+                        <span>Top-5 standplaatsen op pauze- en wachtvensters</span>
+                    </div>
+                    <button @onclick="LoadPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(PowerProfiles.Message))
+                {
+                    <p class="selection-message">@PowerProfiles.Message</p>
+                }
+                else
+                {
+                    <div class="power-heatmap" aria-label="Standplaats per uur vermogensvraag">
+                        <div class="power-grid-corner"></div>
+                        @foreach (var hour in Enumerable.Range(0, 24))
+                        {
+                            <span class="power-hour-label">@($"{hour:00}")</span>
+                        }
+                        @foreach (var profile in PowerProfiles.Locations.Take(5))
+                        {
+                            <button class="power-location-label" title="@profile.Address" @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
+                                @(string.IsNullOrWhiteSpace(profile.Name) ? profile.Address : profile.Name)
+                            </button>
+                            @foreach (var cell in profile.HourlyProfile.OrderBy(x => x.Hour))
+                            {
+                                <button class="power-cell"
+                                        style="@PowerCellStyle(cell.RequiredKw, PowerProfiles.Locations)"
+                                        title="@($"{cell.Label}: {cell.RequiredKw:N0} kW · {cell.Vehicles:N0} voertuigen")"
+                                        @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
+                                    <span>@(cell.RequiredKw > 0 ? cell.RequiredKw.ToString("N0") : "")</span>
+                                </button>
+                            }
+                        }
+                    </div>
+                    <div class="power-profile-summary">
+                        @foreach (var profile in PowerProfiles.Locations.Take(5))
+                        {
+                            <button class="power-summary-row" @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
+                                <strong>@(string.IsNullOrWhiteSpace(profile.Name) ? profile.Address : profile.Name)</strong>
+                                <span>@profile.PeakKw.ToString("N0") kW piek</span>
+                                <span>@profile.UniqueOwnVehicles.ToString("N0") eigen · @profile.UniqueCharterVehicles.ToString("N0") charter</span>
+                            </button>
+                        }
+                    </div>
+                }
+                @if (PowerDiagnostics is not null)
+                {
+                    <p class="power-diagnostics">
+                        Diagnose: @PowerDiagnostics.ChargeWindowActions.ToString("N0") laadvensters,
+                        @PowerDiagnostics.MissingLocationActions.ToString("N0") zonder locatie,
+                        @PowerDiagnostics.UnknownVehicleClassActions.ToString("N0") onbekende voertuigklasse.
+                    </p>
+                }
+            </section>
+        }
+
+        @if (SelectedPowerProfile is not null)
+        {
+            <section class="selection-panel compact-selection">
+                <div class="panel-heading">
+                    <div>
+                        <h3>@(SelectedPowerProfile.Profile?.Name ?? "Standplaatsprofiel")</h3>
+                        <span>Drill-down vermogensprofiel</span>
+                    </div>
+                </div>
+                @if (SelectedPowerProfile.Profile is not null)
+                {
+                    var profile = SelectedPowerProfile.Profile;
+                    <div class="metric-row compact">
+                        <div class="metric"><span>Voertuigen</span><strong>@profile.UniqueVehicles.ToString("N0")</strong></div>
+                        <div class="metric"><span>Eigen</span><strong>@profile.UniqueOwnVehicles.ToString("N0")</strong></div>
+                        <div class="metric"><span>Charter</span><strong>@profile.UniqueCharterVehicles.ToString("N0")</strong></div>
+                        <div class="metric"><span>Piek</span><strong>@profile.PeakKw.ToString("N0") kW</strong></div>
+                    </div>
+                    <div class="window-list">
+                        @foreach (var scenario in SelectedPowerProfile.Scenarios)
+                        {
+                            var peak = scenario.HourlyProfile.MaxBy(x => x.RequiredKw);
+                            <div class="window-row">
+                                <strong>@scenario.Year · @scenario.Mode</strong>
+                                <span>factor @scenario.ScaleFactor.ToString("P0")</span>
+                                <span>@(peak?.Label ?? "00:00")</span>
+                                <span>@(peak?.RequiredKw.ToString("N0") ?? "0") kW</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+        }
 
         @if (Dashboard?.ZeZones.Length > 0)
         {
@@ -283,6 +382,17 @@
                             <div>
                                 <strong>Vaste stilstandlocaties</strong>
                                 <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowStandplaatsen)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol standplaats-marker"></span>
+                            <div>
+                                <strong>Standplaatsen (wagenpark)</strong>
+                                <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
                             </div>
                         </div>
                     }
@@ -555,6 +665,9 @@
     private DashboardResponse? Dashboard { get; set; }
     private SimulationResponse? Simulation { get; set; }
     private SelectionDetailResponse? SelectedDetail { get; set; }
+    private PowerProfileResponse? PowerProfiles { get; set; }
+    private PowerLocationProfileResponse? SelectedPowerProfile { get; set; }
+    private PowerDiagnosticsResponse? PowerDiagnostics { get; set; }
     private DatasetUploadResult? UploadResult { get; set; }
     private DotNetObjectReference<Home>? MapCallbacks { get; set; }
     private bool IsBusy { get; set; }
@@ -581,6 +694,7 @@
     private bool ShowRoads { get; set; }
     private bool ShowRoadHeat { get; set; }
     private bool ShowOvernight { get; set; } = true;
+    private bool ShowStandplaatsen { get; set; }
     private bool ShowChargers { get; set; } = true;
     private int MinDepotVehicles { get; set; } = 5;
     private double ScenarioKwhPerKm { get; set; } = 1.2;
@@ -666,11 +780,49 @@
             var filter = BuildFilter();
             Summary = await Analysis.GetSummaryAsync(filter);
             Dashboard = await Analysis.GetDashboardAsync(filter);
+            await LoadPowerProfilesAsync();
         }
         finally
         {
             IsBusy = false;
         }
+    }
+
+    private async Task LoadPowerProfilesAsync()
+    {
+        var filter = BuildFilter();
+        PowerProfiles = await Analysis.GetPowerProfilesAsync(new PowerProfileRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            ZeZoneMode = filter.ZeZoneMode,
+            TopLocations = 5,
+            ScenarioYears = [2027, 2030],
+            ScenarioMode = "linear"
+        });
+        PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
+    }
+
+    private async Task SelectPowerLocationAsync(string locationId)
+    {
+        var filter = BuildFilter();
+        SelectedPowerProfile = await Analysis.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            ZeZoneMode = filter.ZeZoneMode,
+            LocationId = locationId,
+            ScenarioYears = [2027, 2030],
+            ScenarioMode = "linear"
+        });
     }
 
     private async Task RunSimulationAsync()
@@ -713,6 +865,7 @@
             showRoads = ShowRoads,
             showRoadHeat = ShowRoadHeat,
             showOvernight = ShowOvernight,
+            showStandplaatsen = ShowStandplaatsen,
             showChargers = ShowChargers
         });
     }
@@ -988,6 +1141,14 @@
         var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
         var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.12 + 0.78 * intensity;
         return $"--hour-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private static string PowerCellStyle(double requiredKw, IReadOnlyCollection<PowerLocationProfile> profiles)
+    {
+        var max = profiles.SelectMany(x => x.HourlyProfile).Select(x => x.RequiredKw).DefaultIfEmpty(0).Max();
+        var intensity = max <= 0 ? 0 : Math.Clamp(requiredKw / max, 0, 1);
+        var alpha = requiredKw <= 0 ? 0 : 0.14 + 0.76 * intensity;
+        return $"--power-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
     }
 
     private static string ShortDayLabel(string dayLabel)

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
-using System.Xml;
 using DuckDB.NET.Data;
 using LaadinfrastructuurPlanner.Models;
 
@@ -77,6 +76,7 @@ public sealed class DuckDbRouteStore
             {
                 Execute(connection, $"CREATE OR REPLACE TABLE stops AS SELECT * FROM read_parquet({SqlString(stops)});");
                 EnsureStopsVehicleColumns(connection);
+                CreateRouteActionsFromStops(connection);
                 CreateZeroEmissionZoneTables(connection);
                 CreateAnalysisTables(connection);
             }
@@ -367,7 +367,7 @@ public sealed class DuckDbRouteStore
 
         var payload = new
         {
-            Version = "charging-demand-v7-ze-zones",
+            Version = "charging-demand-v8-power-profiles",
             Sources = sourcePaths.Select(path =>
             {
                 var info = new FileInfo(path);
@@ -480,6 +480,82 @@ public sealed class DuckDbRouteStore
         var fromSql = hasCoordinates
             ? "typed t"
             : $"typed t LEFT JOIN read_parquet({SqlString(geocodePath!)}) g ON t.adres = CAST(g.query AS VARCHAR)";
+
+        Execute(connection,
+            $$"""
+            CREATE OR REPLACE TABLE route_actions AS
+            WITH typed AS (
+                SELECT
+                    trim({{carrier}}) AS vervoerder,
+                    trim({{carrierType}}) AS vervoerder_type_raw,
+                    trim({{vehicle}}) AS wagencode,
+                    trim({{vehicleType}}) AS wagentype_omschrijving,
+                    trim({{tripId}}) AS trip_id,
+                    lower(trim({{action}})) AS actie_soort,
+                    trim({{locationName}}) AS locatie_naam,
+                    trim({{address}}) AS adres,
+                    upper(trim({{licensePlate}})) AS kenteken,
+                    regexp_replace(upper(trim({{licensePlate}})), '[^A-Z0-9]', '', 'g') AS kenteken_norm,
+                    {{plannedStart}} AS gepland_start,
+                    {{plannedEnd}} AS gepland_eind,
+                    {{distance}} AS afstand_km_trip,
+                    {{segmentDistance}} AS afstand_km_segment,
+                    {{directLatSql}} AS direct_lat,
+                    {{directLonSql}} AS direct_lon
+                FROM raw_csv
+            ),
+            geocoded AS (
+                SELECT
+                    t.*,
+                    {{latSql}} AS lat,
+                    {{lonSql}} AS lon
+                FROM {{fromSql}}
+                WHERE t.wagencode <> ''
+                    AND t.trip_id <> ''
+                    AND t.gepland_start IS NOT NULL
+            ),
+            sequenced AS (
+                SELECT
+                    *,
+                    CAST(gepland_start AS DATE) AS trip_date,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY wagencode, CAST(gepland_start AS DATE), trip_id
+                        ORDER BY gepland_start, gepland_eind, adres, actie_soort
+                    ) - 1 AS action_seq
+                FROM geocoded
+            )
+            SELECT
+                wagencode,
+                vervoerder,
+                CASE
+                    WHEN lower(vervoerder_type_raw) LIKE '%eigen%' OR lower(vervoerder_type_raw) LIKE '%own%' THEN 'own'
+                    WHEN lower(vervoerder_type_raw) LIKE '%charter%' OR lower(vervoerder_type_raw) LIKE '%sub%' THEN 'charter'
+                    WHEN lower(vervoerder) LIKE '%eigen%' THEN 'own'
+                    WHEN lower(vervoerder) LIKE '%uitbesteed%' OR lower(vervoerder) LIKE '%charter%' THEN 'charter'
+                    ELSE 'unknown'
+                END AS vehicle_class,
+                trip_date,
+                trip_id,
+                CAST(action_seq AS INTEGER) AS action_seq,
+                actie_soort,
+                COALESCE(NULLIF(locatie_naam, ''), adres, 'unknown_location') AS locatie_naam,
+                COALESCE(NULLIF(adres, ''), 'unknown_location') AS adres,
+                CASE
+                    WHEN lat IS NULL OR lon IS NULL THEN 'unknown_location:' || COALESCE(NULLIF(adres, ''), 'missing')
+                    ELSE printf('auto:%.3f:%.3f', ROUND(CAST(lat AS DOUBLE), 3), ROUND(CAST(lon AS DOUBLE), 3))
+                END AS location_id,
+                gepland_start,
+                gepland_eind,
+                GREATEST(COALESCE(date_diff('second', gepland_start, gepland_eind), 0) / 60.0, 0.0) AS dwell_min,
+                COALESCE(afstand_km_segment, 0.0) AS afstand_km,
+                COALESCE(afstand_km_trip, 0.0) AS afstand_km_trip,
+                lat,
+                lon,
+                kenteken,
+                kenteken_norm,
+                wagentype_omschrijving
+            FROM sequenced;
+            """);
 
         Execute(connection,
             $$"""
@@ -663,7 +739,7 @@ public sealed class DuckDbRouteStore
             yield break;
         }
 
-        var headers = SplitCsvLine(header).Select(NormalizeHeader).ToArray();
+        var headers = SplitCsvLine(header).Select(XlsxReader.NormalizeHeader).ToArray();
         var pc6Index = Array.IndexOf(headers, "pc6");
         var zoneIndex = Array.IndexOf(headers, "ze_zone");
         var startIndex = Array.IndexOf(headers, "ze_startdatum");
@@ -677,39 +753,39 @@ public sealed class DuckDbRouteStore
         while ((line = reader.ReadLine()) is not null)
         {
             var cells = SplitCsvLine(line);
-            if (inZoneIndex >= 0 && !string.Equals(Cell(cells, inZoneIndex), "ja", StringComparison.OrdinalIgnoreCase))
+            if (inZoneIndex >= 0 && !string.Equals(XlsxReader.Cell(cells, inZoneIndex), "ja", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var pc6 = NormalizePc6(Cell(cells, pc6Index));
-            var zone = Cell(cells, zoneIndex).Trim();
+            var pc6 = NormalizePc6(XlsxReader.Cell(cells, pc6Index));
+            var zone = XlsxReader.Cell(cells, zoneIndex).Trim();
             if (pc6.Length == 0 || zone.Length == 0)
             {
                 continue;
             }
 
-            yield return new ZeZoneLookupRow(pc6, zone, startIndex >= 0 ? Cell(cells, startIndex).Trim() : "");
+            yield return new ZeZoneLookupRow(pc6, zone, startIndex >= 0 ? XlsxReader.Cell(cells, startIndex).Trim() : "");
         }
     }
 
     private static IEnumerable<ZeZoneLookupRow> LoadZeZoneXlsx(Stream source)
     {
         using var archive = new ZipArchive(source, ZipArchiveMode.Read, leaveOpen: true);
-        var sharedStrings = ReadSharedStrings(archive);
-        var sheetPath = ResolveWorksheetPath(archive, "overlap_pc6_ze_zones");
+        var sharedStrings = XlsxReader.ReadSharedStrings(archive);
+        var sheetPath = XlsxReader.ResolveWorksheetPath(archive, "overlap_pc6_ze_zones");
         if (sheetPath is null)
         {
             return [];
         }
 
-        var rows = ReadWorksheetRows(archive, sheetPath, sharedStrings).ToArray();
+        var rows = XlsxReader.ReadWorksheetRows(archive, sheetPath, sharedStrings).ToArray();
         if (rows.Length == 0)
         {
             return [];
         }
 
-        var headers = rows[0].Select(NormalizeHeader).ToArray();
+        var headers = rows[0].Select(XlsxReader.NormalizeHeader).ToArray();
         var pc6Index = Array.IndexOf(headers, "pc6");
         var zoneIndex = Array.IndexOf(headers, "ze_zone");
         var startIndex = Array.IndexOf(headers, "ze_startdatum");
@@ -721,173 +797,14 @@ public sealed class DuckDbRouteStore
 
         return rows
             .Skip(1)
-            .Where(row => string.Equals(Cell(row, inZoneIndex), "ja", StringComparison.OrdinalIgnoreCase))
+            .Where(row => string.Equals(XlsxReader.Cell(row, inZoneIndex), "ja", StringComparison.OrdinalIgnoreCase))
             .Select(row => new ZeZoneLookupRow(
-                NormalizePc6(Cell(row, pc6Index)),
-                Cell(row, zoneIndex).Trim(),
-                startIndex >= 0 ? Cell(row, startIndex).Trim() : ""))
+                NormalizePc6(XlsxReader.Cell(row, pc6Index)),
+                XlsxReader.Cell(row, zoneIndex).Trim(),
+                startIndex >= 0 ? XlsxReader.Cell(row, startIndex).Trim() : ""))
             .Where(row => row.Pc6.Length > 0 && row.Zone.Length > 0)
             .GroupBy(row => row.Pc6, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First());
-    }
-
-    private static string[] ReadSharedStrings(ZipArchive archive)
-    {
-        var entry = archive.GetEntry("xl/sharedStrings.xml");
-        if (entry is null)
-        {
-            return [];
-        }
-
-        var values = new List<string>();
-        using var stream = entry.Open();
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings { IgnoreWhitespace = false });
-        var text = new StringBuilder();
-        while (reader.Read())
-        {
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "si")
-            {
-                text.Clear();
-            }
-            else if (reader.NodeType == XmlNodeType.Text)
-            {
-                text.Append(reader.Value);
-            }
-            else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "si")
-            {
-                values.Add(text.ToString());
-            }
-        }
-
-        return values.ToArray();
-    }
-
-    private static string? ResolveWorksheetPath(ZipArchive archive, string sheetName)
-    {
-        var workbook = archive.GetEntry("xl/workbook.xml");
-        var rels = archive.GetEntry("xl/_rels/workbook.xml.rels");
-        if (workbook is null || rels is null)
-        {
-            return null;
-        }
-
-        string? relationId = null;
-        using (var stream = workbook.Open())
-        using (var reader = XmlReader.Create(stream))
-        {
-            while (reader.Read())
-            {
-                if (reader.NodeType == XmlNodeType.Element
-                    && reader.LocalName == "sheet"
-                    && string.Equals(reader.GetAttribute("name"), sheetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    relationId = reader.GetAttribute("id", "http://schemas.openxmlformats.org/officeDocument/2006/relationships");
-                    break;
-                }
-            }
-        }
-
-        if (relationId is null)
-        {
-            return null;
-        }
-
-        using var relStream = rels.Open();
-        using var relReader = XmlReader.Create(relStream);
-        while (relReader.Read())
-        {
-            if (relReader.NodeType == XmlNodeType.Element
-                && relReader.LocalName == "Relationship"
-                && string.Equals(relReader.GetAttribute("Id"), relationId, StringComparison.Ordinal))
-            {
-                var target = relReader.GetAttribute("Target");
-                if (string.IsNullOrWhiteSpace(target))
-                {
-                    return null;
-                }
-
-                return target.StartsWith("worksheets/", StringComparison.OrdinalIgnoreCase)
-                    ? "xl/" + target
-                    : target.TrimStart('/');
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string[]> ReadWorksheetRows(ZipArchive archive, string sheetPath, IReadOnlyList<string> sharedStrings)
-    {
-        var entry = archive.GetEntry(sheetPath);
-        if (entry is null)
-        {
-            yield break;
-        }
-
-        using var stream = entry.Open();
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings { IgnoreWhitespace = true });
-        var row = new Dictionary<int, string>();
-        string? cellRef = null;
-        string? cellType = null;
-        while (reader.Read())
-        {
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "row")
-            {
-                row.Clear();
-            }
-            else if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "c")
-            {
-                cellRef = reader.GetAttribute("r");
-                cellType = reader.GetAttribute("t");
-            }
-            else if (reader.NodeType == XmlNodeType.Element && (reader.LocalName == "v" || reader.LocalName == "t"))
-            {
-                var rawValue = reader.ReadElementContentAsString();
-                var column = ColumnIndex(cellRef);
-                if (column >= 0)
-                {
-                    row[column] = cellType == "s"
-                        && int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sharedIndex)
-                        && sharedIndex >= 0
-                        && sharedIndex < sharedStrings.Count
-                            ? sharedStrings[sharedIndex]
-                            : rawValue;
-                }
-            }
-            else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "row")
-            {
-                var width = row.Count == 0 ? 0 : row.Keys.Max() + 1;
-                var cells = new string[width];
-                foreach (var item in row)
-                {
-                    cells[item.Key] = item.Value;
-                }
-
-                yield return cells;
-            }
-        }
-    }
-
-    private static int ColumnIndex(string? cellReference)
-    {
-        if (string.IsNullOrWhiteSpace(cellReference))
-        {
-            return -1;
-        }
-
-        var index = 0;
-        var seenLetter = false;
-        foreach (var ch in cellReference)
-        {
-            if (!char.IsLetter(ch))
-            {
-                break;
-            }
-
-            seenLetter = true;
-            index = index * 26 + (char.ToUpperInvariant(ch) - 'A' + 1);
-        }
-
-        return seenLetter ? index - 1 : -1;
     }
 
     private static void WriteZeZoneCsv(string path, IReadOnlyList<ZeZoneLookupRow> zones)
@@ -946,19 +863,9 @@ public sealed class DuckDbRouteStore
         return cells.ToArray();
     }
 
-    private static string Cell(IReadOnlyList<string> cells, int index)
-    {
-        return index >= 0 && index < cells.Count ? cells[index] : "";
-    }
-
     private static string NormalizePc6(string value)
     {
         return new string(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-    }
-
-    private static string NormalizeHeader(string value)
-    {
-        return value.Trim().ToLowerInvariant().Replace(" ", "_", StringComparison.Ordinal);
     }
 
     private sealed record ZeZoneLookupRow(string Pc6, string Zone, string StartDate);
@@ -1205,6 +1112,59 @@ public sealed class DuckDbRouteStore
         {
             Execute(connection, "ALTER TABLE stops ADD COLUMN kenteken_norm VARCHAR DEFAULT '';");
         }
+    }
+
+    private static void CreateRouteActionsFromStops(DuckDBConnection connection)
+    {
+        var vehicleType = HasColumn(connection, "stops", "wagentype_omschrijving")
+            ? "COALESCE(CAST(wagentype_omschrijving AS VARCHAR), '')"
+            : "''";
+        var licensePlate = HasColumn(connection, "stops", "kenteken")
+            ? "COALESCE(CAST(kenteken AS VARCHAR), '')"
+            : "''";
+        var normalizedLicensePlate = HasColumn(connection, "stops", "kenteken_norm")
+            ? "COALESCE(CAST(kenteken_norm AS VARCHAR), '')"
+            : "''";
+        var plannedStart = HasColumn(connection, "stops", "gepland_start")
+            ? "TRY_CAST(gepland_start AS TIMESTAMP)"
+            : "CAST(trip_date AS TIMESTAMP)";
+        var plannedEnd = HasColumn(connection, "stops", "gepland_eind")
+            ? "TRY_CAST(gepland_eind AS TIMESTAMP)"
+            : "CAST(trip_date AS TIMESTAMP)";
+
+        Execute(connection,
+            $$"""
+            CREATE OR REPLACE TABLE route_actions AS
+            SELECT
+                CAST(wagencode AS VARCHAR) AS wagencode,
+                COALESCE(CAST(vervoerder AS VARCHAR), '') AS vervoerder,
+                CASE
+                    WHEN COALESCE(CAST(vervoerder_type AS VARCHAR), '') = 'eigen' THEN 'own'
+                    WHEN COALESCE(CAST(vervoerder_type AS VARCHAR), '') = 'charter' THEN 'charter'
+                    ELSE 'unknown'
+                END AS vehicle_class,
+                CAST(trip_date AS DATE) AS trip_date,
+                CAST(trip_id AS VARCHAR) AS trip_id,
+                COALESCE(CAST(stop_seq AS INTEGER), 0) AS action_seq,
+                lower(COALESCE(CAST(acties AS VARCHAR), '')) AS actie_soort,
+                COALESCE(CAST(locatie_naam AS VARCHAR), CAST(adres AS VARCHAR), 'unknown_location') AS locatie_naam,
+                COALESCE(CAST(adres AS VARCHAR), 'unknown_location') AS adres,
+                CASE
+                    WHEN lat IS NULL OR lon IS NULL THEN 'unknown_location:' || COALESCE(CAST(adres AS VARCHAR), 'missing')
+                    ELSE printf('auto:%.3f:%.3f', ROUND(CAST(lat AS DOUBLE), 3), ROUND(CAST(lon AS DOUBLE), 3))
+                END AS location_id,
+                {{plannedStart}} AS gepland_start,
+                {{plannedEnd}} AS gepland_eind,
+                GREATEST(COALESCE(date_diff('second', {{plannedStart}}, {{plannedEnd}}), 0) / 60.0, 0.0) AS dwell_min,
+                COALESCE(TRY_CAST(afstand_km AS DOUBLE), 0) AS afstand_km,
+                COALESCE(TRY_CAST(afstand_km_trip AS DOUBLE), 0) AS afstand_km_trip,
+                TRY_CAST(lat AS DOUBLE) AS lat,
+                TRY_CAST(lon AS DOUBLE) AS lon,
+                {{licensePlate}} AS kenteken,
+                {{normalizedLicensePlate}} AS kenteken_norm,
+                {{vehicleType}} AS wagentype_omschrijving
+            FROM stops;
+            """);
     }
 
     private static void EnsureStopsZeroEmissionColumns(DuckDBConnection connection)

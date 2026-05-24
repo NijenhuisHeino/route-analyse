@@ -1286,7 +1286,15 @@ public sealed partial class RouteAnalysisService
     private static long GetInt64(DbDataReader reader, string name)
     {
         var ordinal = reader.GetOrdinal(name);
-        return reader.IsDBNull(ordinal) ? 0 : Convert.ToInt64(reader.GetValue(ordinal));
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        var value = reader.GetValue(ordinal);
+        return value is System.Numerics.BigInteger bigInteger
+            ? (long)bigInteger
+            : Convert.ToInt64(value);
     }
 
     private static int GetInt32(DbDataReader reader, string name)

@@ -619,6 +619,18 @@ td span,
   background: #dc2626;
 }
 
+.legend-symbol.standplaats-marker {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #fff;
+  background: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.36), 0 2px 8px rgba(37, 99, 235, 0.22);
+}
+
+.hint-text.disclaimer {
+  color: #b45309;
+}
+
 .legend-line {
   display: inline-block;
   justify-self: center;
@@ -667,6 +679,58 @@ td span,
 
 .charger-popup span {
   display: block;
+}
+
+.standplaats-popup {
+  display: grid;
+  gap: 6px;
+  color: var(--eta-text);
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 400px;
+}
+
+.standplaats-popup strong {
+  color: var(--eta-purple);
+  font-size: 14px;
+}
+
+.standplaats-popup span {
+  display: block;
+}
+
+.standplaats-popup__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.standplaats-popup__table th,
+.standplaats-popup__table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--eta-border);
+  text-align: left;
+}
+
+.standplaats-popup__table th {
+  background: #f1f3f9;
+  font-weight: 700;
+  color: var(--eta-muted);
+}
+
+.standplaats-popup__hidden {
+  margin: 0;
+  color: var(--eta-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.standplaats-popup__disclaimer {
+  margin: 6px 0 0;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .selection-message {
@@ -963,6 +1027,103 @@ td span {
 td span {
   margin-top: 3px;
   font-size: 12px;
+}
+
+.power-profile-panel {
+  overflow: hidden;
+}
+
+.power-heatmap {
+  display: grid;
+  grid-template-columns: minmax(160px, 260px) repeat(24, minmax(28px, 1fr));
+  gap: 3px;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.power-grid-corner,
+.power-hour-label,
+.power-location-label,
+.power-cell {
+  min-height: 34px;
+}
+
+.power-hour-label {
+  display: grid;
+  place-items: center;
+  color: var(--eta-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.power-location-label,
+.power-summary-row,
+.power-cell {
+  border: 1px solid var(--eta-border);
+  background: white;
+  color: var(--eta-purple);
+  cursor: pointer;
+}
+
+.power-location-label {
+  min-width: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.power-cell {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  padding: 0;
+  border-radius: 5px;
+  background: rgba(249, 188, 19, var(--power-alpha, 0));
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.power-cell span {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.power-profile-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.power-summary-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.power-summary-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.power-summary-row span,
+.power-diagnostics {
+  color: var(--eta-muted);
+  font-size: 12px;
+}
+
+.power-diagnostics {
+  margin: 12px 0 0;
 }
 
 #blazor-error-ui {

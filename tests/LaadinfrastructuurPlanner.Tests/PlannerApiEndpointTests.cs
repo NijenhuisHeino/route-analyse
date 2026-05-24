@@ -95,6 +95,14 @@ public sealed class PlannerApiEndpointTests : IDisposable
         Assert.Equal("ok", stopDetail.Status);
         Assert.Equal("stop", stopDetail.SelectionType);
         Assert.NotEmpty(stopDetail.HeatPoints);
+
+        var power = await PostAsync<PowerProfileResponse>(client, "/api/power/profiles", new PowerProfileRequest { TopLocations = 5 });
+        Assert.NotNull(power);
+        Assert.NotEqual("missing", power.Status);
+
+        var diagnostics = await PostAsync<PowerDiagnosticsResponse>(client, "/api/power/diagnostics", new AnalysisFilter());
+        Assert.NotNull(diagnostics);
+        Assert.NotEmpty(diagnostics.Assumptions);
     }
 
     public void Dispose()

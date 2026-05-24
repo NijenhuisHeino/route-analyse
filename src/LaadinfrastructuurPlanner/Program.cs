@@ -13,9 +13,16 @@ builder.Services.Configure<HubOptions>(options =>
     options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
 });
 builder.Services.AddMemoryCache();
-builder.Services.AddSingleton(_ => RouteAnalysisOptionsFactory.FromContentRoot(builder.Environment.ContentRootPath));
+builder.Services.AddSingleton(_ => RouteAnalysisOptionsFactory.FromContentRoot(builder.Environment.ContentRootPath, builder.Configuration));
 builder.Services.AddSingleton<DuckDbRouteStore>();
 builder.Services.AddSingleton<RouteAnalysisService>();
+builder.Services.AddHttpClient(nameof(FleetDataService), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("LaadinfrastructuurPlanner/1.0 (info@nijenhuistrucksolutions.nl)");
+    client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("nl");
+});
+builder.Services.AddSingleton<FleetDataService>();
 builder.Services.AddHostedService<PlannerWarmupService>();
 
 var app = builder.Build();

@@ -40,11 +40,26 @@ public static class PlannerApiEndpoints
         api.MapPost("/charging/scenario", ([FromBody] ChargingScenarioRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetChargingScenarioAsync(request, cancellationToken));
 
+        api.MapPost("/power/profiles", ([FromBody] PowerProfileRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetPowerProfilesAsync(request, cancellationToken));
+
+        api.MapPost("/power/location", ([FromBody] PowerLocationProfileRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetPowerLocationProfileAsync(request, cancellationToken));
+
+        api.MapPost("/power/diagnostics", ([FromBody] AnalysisFilter filter, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetPowerDiagnosticsAsync(filter, cancellationToken));
+
+        api.MapPost("/power/export/nieuwegein", (RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.ExportNieuwegeinPowerReportAsync(cancellationToken));
+
         api.MapPost("/dashboard", ([FromBody] AnalysisFilter filter, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetDashboardAsync(filter, cancellationToken));
 
         api.MapPost("/simulation", ([FromBody] SimulationRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetSimulationAsync(request, cancellationToken));
+
+        api.MapGet("/fleet/standplaatsen", (FleetDataService fleet, CancellationToken cancellationToken) =>
+            fleet.GetDepotsAsync(cancellationToken));
 
         return endpoints;
     }

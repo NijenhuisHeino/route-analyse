@@ -93,6 +93,67 @@ public sealed class OriginalCsvImportTests : IDisposable
         Assert.Equal(42, summary.TotalKm);
     }
 
+    [Fact]
+    public async Task OriginalCsvWaitAndPauseActionsProduceHourlyPowerProfiles()
+    {
+        var cacheDir = Path.Combine(_root, ".cache-power");
+        var csvDir = Path.Combine(_root, "original-csv-power");
+        Directory.CreateDirectory(cacheDir);
+        Directory.CreateDirectory(csvDir);
+        WritePowerProfileCsv(Path.Combine(csvDir, "Rittendata per wagen_detail_jan.csv"));
+        WritePowerGeocodeParquet(Path.Combine(cacheDir, "geocode_addresses.parquet"));
+
+        var options = new RouteAnalysisOptions
+        {
+            RepoRoot = _root,
+            CacheDir = cacheDir,
+            UploadedDatasetDir = Path.Combine(cacheDir, "uploaded-dataset", "active"),
+            DuckDbPath = Path.Combine(cacheDir, "planner", "route-analysis.duckdb"),
+            ManifestPath = Path.Combine(cacheDir, "planner", "manifest.json"),
+            OriginalCsvDir = csvDir,
+        };
+        var service = new RouteAnalysisService(new DuckDbRouteStore(options), new MemoryCache(new MemoryCacheOptions()));
+
+        var profiles = await service.GetPowerProfilesAsync(new PowerProfileRequest
+        {
+            DateFrom = new DateOnly(2026, 1, 1),
+            DateTo = new DateOnly(2026, 1, 2),
+            VehicleClasses = ["own"],
+            TopLocations = 5,
+        });
+
+        Assert.Equal("ok", profiles.Status);
+        var nieuwegein = Assert.Single(profiles.Locations);
+        Assert.Contains("Groteweerd", nieuwegein.Address, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(350, nieuwegein.PeakKw);
+        Assert.Equal(1, nieuwegein.UniqueOwnVehicles);
+        Assert.Equal(0, nieuwegein.UniqueCharterVehicles);
+        Assert.Equal(24, nieuwegein.HourlyProfile.Length);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 350 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 350 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 350 && h.Vehicles == 1);
+        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 23 && h.RequiredKw == 350);
+
+        var detail = await service.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+        {
+            LocationId = nieuwegein.LocationId,
+            VehicleClasses = ["own"],
+            ScenarioYears = [2027, 2030],
+            ScenarioMode = "linear",
+        });
+
+        Assert.Equal("ok", detail.Status);
+        Assert.Equal(nieuwegein.LocationId, detail.Profile?.LocationId);
+        Assert.NotEmpty(detail.DailyMetrics);
+        Assert.Contains(detail.Scenarios, s => s.Year == 2027 && s.HourlyProfile.Length == 24);
+        Assert.Contains(detail.Scenarios, s => s.Year == 2030 && s.Mode == "linear");
+
+        var diagnostics = await service.GetPowerDiagnosticsAsync(new AnalysisFilter());
+        Assert.True(diagnostics.RoutesWithoutWaitWindow > 0);
+        Assert.Contains(diagnostics.VehicleClassCounts, x => x.VehicleClass == "own");
+        Assert.Contains(diagnostics.Assumptions, text => text.Contains("350", StringComparison.Ordinal));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -131,6 +192,68 @@ public sealed class OriginalCsvImportTests : IDisposable
             Row("001", "T2", "11-BZX-8", "02-1-2026 06:00:00", "02-1-2026 15:00:00", "180", "02-1-2026 06:00:00", "02-1-2026 06:00:00", "Depot A"),
             Row("001", "T2", "11-BZX-8", "02-1-2026 06:00:00", "02-1-2026 15:00:00", "180", "02-1-2026 15:00:00", "02-1-2026 15:00:00", "Depot A")
         ]);
+    }
+
+    private static void WritePowerProfileCsv(string path)
+    {
+        var header = Csv(
+            "Voertuig Type Eigenaar",
+            "Wagen Code",
+            "Wagentype Omschrijving",
+            "Tripnummer",
+            "Gerealizeerd Kenteken",
+            "Starttijd Trip",
+            "Eindtijd Trip",
+            "Totale duur",
+            "Totale rijtijd",
+            "Totale Afstand (KM)",
+            "Actie soort",
+            "Gepland vanaf (Trip actie)",
+            "Gepland tot (Trip actie)",
+            "Adres",
+            "Dagorder Nummer",
+            "Gewicht Dagorder (KG)",
+            "RunningSum Gewicht (KG)");
+
+        File.WriteAllLines(path,
+        [
+            header,
+            ActionRow("Eigen Vervoer", "001", "Trekker met oplegger", "T1", "11-BZX-8", "travel", "01-1-2026 22:00:00", "01-1-2026 22:15:00", "Groteweerd 80, Nieuwegein"),
+            ActionRow("Eigen Vervoer", "001", "Trekker met oplegger", "T1", "11-BZX-8", "wait_task_available", "01-1-2026 23:30:00", "02-1-2026 01:30:00", "Groteweerd 80, Nieuwegein"),
+            ActionRow("Uitbesteed Vervoer", "C01", "Bakwagen 9 ton - hoog", "T2", "22-BBB-2", "pause", "01-1-2026 12:00:00", "01-1-2026 12:45:00", "Depot B"),
+            ActionRow("Eigen Vervoer", "002", "Bakwagen 9 ton - hoog", "T3", "33-CCC-3", "travel", "01-1-2026 08:00:00", "01-1-2026 08:15:00", "Depot C")
+        ]);
+    }
+
+    private static string ActionRow(
+        string carrier,
+        string wagencode,
+        string vehicleType,
+        string tripId,
+        string kenteken,
+        string action,
+        string plannedStart,
+        string plannedEnd,
+        string address)
+    {
+        return Csv(
+            carrier,
+            wagencode,
+            vehicleType,
+            tripId,
+            kenteken,
+            plannedStart,
+            plannedEnd,
+            "02:00:00",
+            "00:15:00",
+            "12",
+            action,
+            plannedStart,
+            plannedEnd,
+            address,
+            "",
+            "",
+            "0");
     }
 
     private static string Row(
@@ -180,6 +303,23 @@ public sealed class OriginalCsvImportTests : IDisposable
                 VALUES
                 ('Depot A', 52.000, 5.000),
                 ('Hub B', 52.500, 5.500)
+            ) AS t(query, lat, lon);
+            """);
+        Execute(connection, $"COPY geocode TO '{SqlPath(path)}' (FORMAT PARQUET);");
+    }
+
+    private static void WritePowerGeocodeParquet(string path)
+    {
+        using var connection = new DuckDBConnection("Data Source=:memory:");
+        connection.Open();
+        Execute(connection,
+            """
+            CREATE TABLE geocode AS
+            SELECT * FROM (
+                VALUES
+                ('Groteweerd 80, Nieuwegein', 52.030, 5.080),
+                ('Depot B', 52.100, 5.100),
+                ('Depot C', 52.200, 5.200)
             ) AS t(query, lat, lon);
             """);
         Execute(connection, $"COPY geocode TO '{SqlPath(path)}' (FORMAT PARQUET);");
