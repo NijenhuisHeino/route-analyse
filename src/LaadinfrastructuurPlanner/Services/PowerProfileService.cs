@@ -811,6 +811,11 @@ public sealed partial class RouteAnalysisService
             var peak = s.HourlyProfile.OrderByDescending(x => x.RequiredKw).FirstOrDefault();
             return $"<tr><td>{s.Year}</td><td>{s.Mode}</td><td>{s.ScaleFactor:P0}</td><td>{peak?.Label}</td><td>{peak?.RequiredKw:N0} kW</td></tr>";
         }));
+        var dailyPeaks = string.Join("", detail.DailyMetrics
+            .OrderByDescending(x => x.PeakKw)
+            .ThenByDescending(x => x.UniqueVehicles)
+            .Take(10)
+            .Select(day => $"<tr><td>{day.Date:dd-MM-yyyy}</td><td>{day.UniqueVehicles:N0}</td><td>{day.OwnVehicles:N0}</td><td>{day.CharterVehicles:N0}</td><td>{day.AvgDwellMin:N0} min</td><td>{day.PeakKw:N0} kW</td></tr>"));
 
         return $$"""
         <!doctype html>
@@ -840,6 +845,8 @@ public sealed partial class RouteAnalysisService
           </section>
           <section class="grid">{{cells}}</section>
           <table><thead><tr><th>Jaar</th><th>Modus</th><th>Schaal</th><th>Piekuur</th><th>Piek</th></tr></thead><tbody>{{scenarios}}</tbody></table>
+          <h2>Top dagpieken</h2>
+          <table><thead><tr><th>Datum</th><th>Voertuigen</th><th>Eigen</th><th>Charter</th><th>Gem. stilstand</th><th>Piek</th></tr></thead><tbody>{{dailyPeaks}}</tbody></table>
         </body>
         </html>
         """;

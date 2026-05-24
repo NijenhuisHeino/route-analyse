@@ -1214,6 +1214,72 @@ td span {
   margin: 12px 0 0;
 }
 
+.power-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.power-report-card {
+  min-width: 0;
+}
+
+.power-bars {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(18px, 1fr));
+  align-items: end;
+  gap: 4px;
+  min-height: 190px;
+  padding-top: 8px;
+}
+
+.power-bar {
+  height: 170px;
+  min-width: 0;
+  padding: 0 2px 4px;
+  border: 1px solid var(--eta-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--eta-purple);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  align-items: end;
+  justify-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.power-bar::before {
+  content: "";
+  width: 100%;
+  height: var(--bar-height, 2%);
+  min-height: 2px;
+  border-radius: 4px 4px 1px 1px;
+  background: linear-gradient(180deg, var(--eta-yellow), var(--eta-orange));
+}
+
+.power-bar span {
+  color: var(--eta-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.power-bar i {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--eta-purple);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-scroll {
+  max-height: 288px;
+}
+
 #blazor-error-ui {
   display: none;
   position: fixed;

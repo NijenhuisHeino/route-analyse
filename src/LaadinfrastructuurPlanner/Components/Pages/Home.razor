@@ -272,6 +272,59 @@
                             </div>
                         }
                     </div>
+                    <div class="power-report-grid">
+                        <div class="analysis-card power-report-card">
+                            <div class="card-heading">
+                                <strong>Uurprofiel huidige selectie</strong>
+                                <span>@profile.HourlyProfile.Max(x => x.RequiredMw).ToString("N2") MW piek</span>
+                            </div>
+                            <div class="power-bars" aria-label="Uurprofiel geselecteerde standplaats">
+                                @foreach (var hour in profile.HourlyProfile.OrderBy(x => x.Hour))
+                                {
+                                    <button class="power-bar"
+                                            style="@PowerBarStyle(hour.RequiredKw, profile.HourlyProfile)"
+                                            title="@($"{hour.Label}: {hour.RequiredKw:N0} kW · {hour.Vehicles:N0} voertuigen")"
+                                            @onclick="() => OpenPowerDemandPopupAsync(profile, hour)">
+                                        <span>@hour.Hour.ToString("00")</span>
+                                        <i>@hour.RequiredMw.ToString("N1")</i>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="analysis-card power-report-card">
+                            <div class="card-heading">
+                                <strong>Dagpieken voor rapport</strong>
+                                <span>@SelectedPowerProfile.DailyMetrics.Length.ToString("N0") dagen</span>
+                            </div>
+                            <div class="table-scroll compact-scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Datum</th>
+                                            <th>Voertuigen</th>
+                                            <th>Eigen</th>
+                                            <th>Charter</th>
+                                            <th>Gem. stilstand</th>
+                                            <th>Piek kW</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var day in TopPowerDays(SelectedPowerProfile.DailyMetrics))
+                                        {
+                                            <tr>
+                                                <td><strong>@day.Date.ToString("dd-MM-yyyy")</strong></td>
+                                                <td>@day.UniqueVehicles.ToString("N0")</td>
+                                                <td>@day.OwnVehicles.ToString("N0")</td>
+                                                <td>@day.CharterVehicles.ToString("N0")</td>
+                                                <td>@day.AvgDwellMin.ToString("N0") min</td>
+                                                <td><strong>@day.PeakKw.ToString("N0")</strong></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 }
             </section>
         }
@@ -1251,6 +1304,22 @@
         var intensity = max <= 0 ? 0 : Math.Clamp(requiredKw / max, 0, 1);
         var alpha = requiredKw <= 0 ? 0 : 0.14 + 0.76 * intensity;
         return $"--power-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private static string PowerBarStyle(double requiredKw, IReadOnlyCollection<PowerHourlyCell> hours)
+    {
+        var max = hours.Select(x => x.RequiredKw).DefaultIfEmpty(0).Max();
+        var height = max <= 0 ? 2 : Math.Max(4, Math.Round(100 * requiredKw / max, 1));
+        return $"--bar-height:{height.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%";
+    }
+
+    private static IEnumerable<PowerDailyMetric> TopPowerDays(IEnumerable<PowerDailyMetric> days)
+    {
+        return days
+            .OrderByDescending(x => x.PeakKw)
+            .ThenByDescending(x => x.UniqueVehicles)
+            .ThenBy(x => x.Date)
+            .Take(10);
     }
 
     private static string ShortDayLabel(string dayLabel)
