@@ -68,13 +68,13 @@
 
         <section class="filter-group">
             <label>Kaartlagen</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowStopHeat" /> Stopdrukte</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowMarkers" /> Toplocaties</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowRoads" /> Wegvlakken</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" /> Wegdrukte</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" /> Vaste stilstandlocaties</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowStandplaatsen" /> Standplaatsen (PostNL-wagenpark)</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowChargers" /> Laadlocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowStopHeat" @bind:after="RefreshMapAsync" /> Stopdrukte</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowMarkers" @bind:after="RefreshMapAsync" /> Toplocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowRoads" @bind:after="RefreshMapAsync" /> Wegvlakken</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" @bind:after="RefreshMapAsync" /> Wegdrukte</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" @bind:after="RefreshMapAsync" /> Vaste stilstandlocaties</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowStandplaatsen" @bind:after="RefreshMapAsync" /> Standplaatsen (PostNL-wagenpark)</label>
+            <label class="toggle"><input type="checkbox" @bind="ShowChargers" @bind:after="RefreshMapAsync" /> Laadlocaties</label>
             <p class="hint-text">Wegvlakken zijn klikbare lijnsegmenten voor detailanalyse. Wegdrukte is een vloeiende heatmap van passages op het wegennet.</p>
             @if (ShowStandplaatsen)
             {
@@ -93,9 +93,9 @@
             </label>
             <label>
                 Batterijcapaciteit (kWh)
-                <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" />
+                <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" @bind:after="RefreshPowerProfilesAsync" />
             </label>
-            <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" /> MCS laden toestaan</label>
+            <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" @bind:after="RefreshPowerProfilesAsync" /> MCS laden toestaan</label>
             <span class="range-value">Max. afname per truck: @MaxVehicleKw.ToString("N0") kW</span>
             <label>
                 Doel laadniveau (%)
@@ -118,12 +118,12 @@
         <section class="filter-grid charger-controls">
             <label>
                 Min. vermogen (kW)
-                <input type="number" min="0" max="400" step="50" @bind="ChargerMinPowerKw" />
+                <input type="number" min="0" max="400" step="50" @bind="ChargerMinPowerKw" @bind:after="RefreshMapAsync" />
             </label>
-            <label class="toggle"><input type="checkbox" @bind="ChargerOnlyDedicated" /> Alleen gereserveerd</label>
-            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPublic" /> Publiek</label>
-            <label class="toggle"><input type="checkbox" @bind="ChargerAccessSemiPublic" /> Semi-publiek</label>
-            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPrivate" /> Privaat</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerOnlyDedicated" @bind:after="RefreshMapAsync" /> Alleen gereserveerd</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPublic" @bind:after="RefreshMapAsync" /> Publiek</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessSemiPublic" @bind:after="RefreshMapAsync" /> Semi-publiek</label>
+            <label class="toggle"><input type="checkbox" @bind="ChargerAccessPrivate" @bind:after="RefreshMapAsync" /> Privaat</label>
         </section>
 
         <button class="primary-action" @onclick="ApplyFiltersAsync" disabled="@IsBusy">
@@ -192,7 +192,7 @@
                         <h3>24-uurs vermogensprofiel</h3>
                         <span>@PowerTransportLabel · klik op een cel voor voertuigen</span>
                     </div>
-                    <button @onclick="LoadPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
+                    <button @onclick="RefreshPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(PowerProfiles.Message))
                 {
@@ -922,6 +922,26 @@
             VehicleClasses = PowerVehicleClasses()
         });
         PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
+    }
+
+    private async Task RefreshPowerProfilesAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        SelectedPowerProfile = null;
+        DemandPopup = null;
+        try
+        {
+            await LoadPowerProfilesAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task SelectPowerLocationAsync(string locationId)
