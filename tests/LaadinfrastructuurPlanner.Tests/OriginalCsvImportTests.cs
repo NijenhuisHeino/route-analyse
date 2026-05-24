@@ -120,19 +120,21 @@ public sealed class OriginalCsvImportTests : IDisposable
             DateTo = new DateOnly(2026, 1, 2),
             VehicleClasses = ["own"],
             TopLocations = 5,
+            CapacityKwh = 590,
         });
 
         Assert.Equal("ok", profiles.Status);
         var nieuwegein = Assert.Single(profiles.Locations);
         Assert.Contains("Groteweerd", nieuwegein.Address, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(350, nieuwegein.PeakKw);
+        Assert.Equal(182, nieuwegein.PeakKw);
         Assert.Equal(1, nieuwegein.UniqueOwnVehicles);
         Assert.Equal(0, nieuwegein.UniqueCharterVehicles);
         Assert.Equal(24, nieuwegein.HourlyProfile.Length);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 350 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 350 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 350 && h.Vehicles == 1);
-        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 23 && h.RequiredKw == 350);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 22 && h.RequiredKw == 182 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 182 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 182 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 182 && h.Vehicles == 1);
+        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 23 && h.RequiredKw == 182);
 
         var detail = await service.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
         {
@@ -140,6 +142,7 @@ public sealed class OriginalCsvImportTests : IDisposable
             VehicleClasses = ["own"],
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
+            CapacityKwh = 590,
         });
 
         Assert.Equal("ok", detail.Status);
@@ -151,7 +154,7 @@ public sealed class OriginalCsvImportTests : IDisposable
         var diagnostics = await service.GetPowerDiagnosticsAsync(new AnalysisFilter());
         Assert.True(diagnostics.RoutesWithoutWaitWindow > 0);
         Assert.Contains(diagnostics.VehicleClassCounts, x => x.VehicleClass == "own");
-        Assert.Contains(diagnostics.Assumptions, text => text.Contains("350", StringComparison.Ordinal));
+        Assert.Contains(diagnostics.Assumptions, text => text.Contains("590", StringComparison.Ordinal));
     }
 
     public void Dispose()

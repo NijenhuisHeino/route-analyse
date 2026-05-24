@@ -3,6 +3,7 @@
 ## 1. 24-uurs vermogensprofiel per standplaats
 - Geimplementeerd: aparte `route_actions`-laag die `wait_task_available`, `wait_after`, `wait_action` en `pause` als laadvensters bewaart.
 - Geimplementeerd: API voor standplaats x uur heatmap, top-5 profiel en locatieprofiel.
+- Berekening: per truck `Batterijcapaciteit (kWh) / stilstanduren`; de heatmap telt deze individuele kW-vragen gelijktijdig op.
 - Output: `out/nieuwegein/nieuwegein_hourly_profile.csv`, `top5_own_current_heatmap.csv`, `top5_own_current_heatmap.parquet` en `nieuwegein_power_report.png`.
 
 ## 2. Eigen vs charter
@@ -24,7 +25,7 @@
 - De UI toont de belangrijkste diagnostics prominent onder de 24-uurs heatmap.
 
 ## Aannames en twijfels
-- Vermogen: trekker/tractor/oplegger = 350 kW; bakwagen/box/rigid = 150 kW; onbekend valt terug op 150 kW.
+- Vermogensvraag: elke truck vraagt standaard 590 kWh op de locatie, gedeeld door de stilstanduren. De 590 kWh komt uit de linker paneelparameter `Batterijcapaciteit (kWh)`.
 - Cut-off tijden en gewicht/ladingprofielen zijn niet meegenomen.
 - Fleet Excel-match is diagnostisch; de primaire `own`/`charter` classificatie blijft gebaseerd op ritdata omdat die voor alle route-acties aanwezig is.
 - De 2026 instroom is omgerekend naar 3 trekker-equivalenten omdat 6 trekkers pas in september instromen.

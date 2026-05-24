@@ -802,7 +802,8 @@
             ZeZoneMode = filter.ZeZoneMode,
             TopLocations = 5,
             ScenarioYears = [2027, 2030],
-            ScenarioMode = "linear"
+            ScenarioMode = "linear",
+            CapacityKwh = ScenarioCapacityKwh
         });
         PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
     }
@@ -821,7 +822,8 @@
             ZeZoneMode = filter.ZeZoneMode,
             LocationId = locationId,
             ScenarioYears = [2027, 2030],
-            ScenarioMode = "linear"
+            ScenarioMode = "linear",
+            CapacityKwh = ScenarioCapacityKwh
         });
     }
 

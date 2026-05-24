@@ -285,6 +285,7 @@ public record PowerProfileRequest : AnalysisFilter
     public int TopLocations { get; init; } = 5;
     public int[] ScenarioYears { get; init; } = [];
     public string ScenarioMode { get; init; } = "linear";
+    public double CapacityKwh { get; init; } = 590;
 }
 
 public sealed record PowerLocationProfileRequest : PowerProfileRequest
