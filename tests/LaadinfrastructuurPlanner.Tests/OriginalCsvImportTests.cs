@@ -232,6 +232,7 @@ public sealed class OriginalCsvImportTests : IDisposable
             header,
             ActionRow("Eigen Vervoer", "001", "Trekker met oplegger", "T1", "11-BZX-8", "travel", "01-1-2026 22:00:00", "01-1-2026 22:15:00", "Groteweerd 80, Nieuwegein"),
             ActionRow("Eigen Vervoer", "001", "Trekker met oplegger", "T1", "11-BZX-8", "wait_task_available", "01-1-2026 23:30:00", "02-1-2026 01:30:00", "Groteweerd 80, Nieuwegein"),
+            ActionRow("Eigen Vervoer", "001", "Trekker met oplegger", "T9", "11-BZX-8", "wait_after", "01-1-2026 23:45:00", "02-1-2026 00:15:00", "Groteweerd 80, Nieuwegein"),
             ActionRow("Uitbesteed Vervoer", "C01", "Bakwagen 9 ton - hoog", "T2", "22-BBB-2", "pause", "01-1-2026 12:00:00", "01-1-2026 12:45:00", "Depot B"),
             ActionRow("Eigen Vervoer", "002", "Bakwagen 9 ton - hoog", "T3", "33-CCC-3", "travel", "01-1-2026 08:00:00", "01-1-2026 08:15:00", "Depot C")
         ]);

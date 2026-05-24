@@ -25,7 +25,7 @@ public sealed partial class RouteAnalysisService
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
-            var events = ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken));
+            var events = MergeOverlappingPresenceWindows(ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken)));
             var profiles = BuildLocationProfiles(events, normalized.CapacityKwh, includeVehicleDemands: false)
                 .OrderByDescending(x => x.PeakKw)
                 .ThenByDescending(x => x.UniqueVehicles)
@@ -62,7 +62,7 @@ public sealed partial class RouteAnalysisService
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
-            var events = ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken))
+            var events = MergeOverlappingPresenceWindows(ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken)))
                 .Where(x => string.Equals(x.LocationId, normalized.LocationId, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
             var profile = BuildLocationProfiles(events, normalized.CapacityKwh, includeVehicleDemands: true).FirstOrDefault();
@@ -362,6 +362,57 @@ public sealed partial class RouteAnalysisService
         }
 
         return windows.ToArray();
+    }
+
+    private static PowerEvent[] MergeOverlappingPresenceWindows(IReadOnlyList<PowerEvent> windows)
+    {
+        var merged = new List<PowerEvent>();
+        foreach (var group in windows
+            .Where(x => x.StartTime != DateTime.MinValue && x.EndTime > x.StartTime)
+            .GroupBy(x => $"{VehicleIdentity(x)}\u001f{x.LocationId}", StringComparer.OrdinalIgnoreCase))
+        {
+            PowerEvent? current = null;
+            foreach (var window in group.OrderBy(x => x.StartTime).ThenBy(x => x.EndTime))
+            {
+                if (current is null)
+                {
+                    current = window;
+                    continue;
+                }
+
+                if (window.StartTime <= current.EndTime.AddMinutes(5))
+                {
+                    var endTime = window.EndTime > current.EndTime ? window.EndTime : current.EndTime;
+                    current = current with
+                    {
+                        EndTime = endTime,
+                        DwellMin = (endTime - current.StartTime).TotalMinutes,
+                    };
+                    continue;
+                }
+
+                merged.Add(current);
+                current = window;
+            }
+
+            if (current is not null)
+            {
+                merged.Add(current);
+            }
+        }
+
+        return merged
+            .OrderBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.TripDate)
+            .ThenBy(x => x.StartTime)
+            .ToArray();
+    }
+
+    private static string VehicleIdentity(PowerEvent powerEvent)
+    {
+        return string.IsNullOrWhiteSpace(powerEvent.VehicleKey)
+            ? $"{powerEvent.Wagencode}|{powerEvent.Kenteken}"
+            : powerEvent.VehicleKey;
     }
 
     private PowerLocationProfile[] BuildLocationProfiles(IReadOnlyList<PowerEvent> events, double capacityKwh, bool includeVehicleDemands)

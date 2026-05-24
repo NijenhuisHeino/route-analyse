@@ -188,7 +188,7 @@
                 <div class="panel-heading">
                     <div>
                         <h3>24-uurs vermogensprofiel</h3>
-                        <span>Top-5 standplaatsen op pauze- en wachtvensters</span>
+                        <span>Piekvraag per uur; klik op een cel voor voertuigen</span>
                     </div>
                     <button @onclick="LoadPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
                 </div>
@@ -198,6 +198,10 @@
                 }
                 else
                 {
+                    <div class="power-method-strip">
+                        <strong>Berekening</strong>
+                        <span>Per truck: @ScenarioCapacityKwh.ToString("N0") kWh / stilstanduren op locatie. Cellen tonen de hoogste uurpiek in de selectie.</span>
+                    </div>
                     <div class="power-heatmap" aria-label="Standplaats per uur vermogensvraag">
                         <div class="power-grid-corner"></div>
                         @foreach (var hour in Enumerable.Range(0, 24))
@@ -213,9 +217,9 @@
                             {
                                 <button class="power-cell"
                                         style="@PowerCellStyle(cell.RequiredKw, PowerProfiles.Locations)"
-                                        title="@($"{cell.Label}: {cell.RequiredKw:N0} kW · {cell.Vehicles:N0} voertuigen")"
+                                        title="@($"{cell.Label}: {FormatPower(cell.RequiredKw)} · {cell.Vehicles:N0} voertuigen")"
                                         @onclick="() => OpenPowerDemandPopupAsync(profile, cell)">
-                                    <span>@(cell.RequiredKw > 0 ? cell.RequiredKw.ToString("N0") : "")</span>
+                                    <span>@(cell.RequiredKw > 0 ? FormatPower(cell.RequiredKw) : "")</span>
                                 </button>
                             }
                         }
@@ -225,7 +229,7 @@
                         {
                             <button class="power-summary-row" @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
                                 <strong>@(string.IsNullOrWhiteSpace(profile.Name) ? profile.Address : profile.Name)</strong>
-                                <span>@profile.PeakKw.ToString("N0") kW piek</span>
+                                <span>@FormatPower(profile.PeakKw) piek</span>
                                 <span>@profile.UniqueOwnVehicles.ToString("N0") eigen · @profile.UniqueCharterVehicles.ToString("N0") charter</span>
                             </button>
                         }
@@ -234,9 +238,9 @@
                 @if (PowerDiagnostics is not null)
                 {
                     <p class="power-diagnostics">
-                        Diagnose: @PowerDiagnostics.ChargeWindowActions.ToString("N0") laadvensters,
-                        @PowerDiagnostics.MissingLocationActions.ToString("N0") zonder locatie,
-                        @PowerDiagnostics.UnknownVehicleClassActions.ToString("N0") onbekende voertuigklasse.
+                        Datakwaliteit: @PowerDiagnostics.ChargeWindowActions.ToString("N0") laadvensters,
+                        @PowerDiagnostics.MissingLocationActions.ToString("N0") zonder bruikbare locatie,
+                        @PowerDiagnostics.UnknownVehicleClassActions.ToString("N0") zonder eigen/charter-label.
                     </p>
                 }
             </section>
@@ -258,7 +262,7 @@
                         <div class="metric"><span>Voertuigen</span><strong>@profile.UniqueVehicles.ToString("N0")</strong></div>
                         <div class="metric"><span>Eigen</span><strong>@profile.UniqueOwnVehicles.ToString("N0")</strong></div>
                         <div class="metric"><span>Charter</span><strong>@profile.UniqueCharterVehicles.ToString("N0")</strong></div>
-                        <div class="metric"><span>Piek</span><strong>@profile.PeakKw.ToString("N0") kW</strong></div>
+                        <div class="metric"><span>Piek</span><strong>@FormatPower(profile.PeakKw)</strong></div>
                     </div>
                     <div class="window-list">
                         @foreach (var scenario in SelectedPowerProfile.Scenarios)
@@ -268,7 +272,7 @@
                                 <strong>@scenario.Year · @scenario.Mode</strong>
                                 <span>factor @scenario.ScaleFactor.ToString("P0")</span>
                                 <span>@(peak?.Label ?? "00:00")</span>
-                                <span>@(peak?.RequiredKw.ToString("N0") ?? "0") kW</span>
+                                <span>@(peak is null ? "0 kW" : FormatPower(peak.RequiredKw))</span>
                             </div>
                         }
                     </div>
@@ -276,17 +280,17 @@
                         <div class="analysis-card power-report-card">
                             <div class="card-heading">
                                 <strong>Uurprofiel huidige selectie</strong>
-                                <span>@profile.HourlyProfile.Max(x => x.RequiredMw).ToString("N2") MW piek</span>
+                                <span>@FormatPower(profile.HourlyProfile.Max(x => x.RequiredKw)) piek</span>
                             </div>
                             <div class="power-bars" aria-label="Uurprofiel geselecteerde standplaats">
                                 @foreach (var hour in profile.HourlyProfile.OrderBy(x => x.Hour))
                                 {
                                     <button class="power-bar"
                                             style="@PowerBarStyle(hour.RequiredKw, profile.HourlyProfile)"
-                                            title="@($"{hour.Label}: {hour.RequiredKw:N0} kW · {hour.Vehicles:N0} voertuigen")"
+                                            title="@($"{hour.Label}: {FormatPower(hour.RequiredKw)} · {hour.Vehicles:N0} voertuigen")"
                                             @onclick="() => OpenPowerDemandPopupAsync(profile, hour)">
                                         <span>@hour.Hour.ToString("00")</span>
-                                        <i>@hour.RequiredMw.ToString("N1")</i>
+                                        <i>@FormatPower(hour.RequiredKw)</i>
                                     </button>
                                 }
                             </div>
@@ -305,7 +309,7 @@
                                             <th>Eigen</th>
                                             <th>Charter</th>
                                             <th>Gem. stilstand</th>
-                                            <th>Piek kW</th>
+                                            <th>Piek</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -317,7 +321,7 @@
                                                 <td>@day.OwnVehicles.ToString("N0")</td>
                                                 <td>@day.CharterVehicles.ToString("N0")</td>
                                                 <td>@day.AvgDwellMin.ToString("N0") min</td>
-                                                <td><strong>@day.PeakKw.ToString("N0")</strong></td>
+                                                <td><strong>@FormatPower(day.PeakKw)</strong></td>
                                             </tr>
                                         }
                                     </tbody>
@@ -739,7 +743,7 @@
                                 <th>Venster</th>
                                 <th>Stilstand</th>
                                 <th>kWh</th>
-                                <th>kW</th>
+                                <th>Vermogen</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -752,7 +756,7 @@
                                     <td>@DisplayValue(vehicle.Window)</td>
                                     <td>@vehicle.StandingHours.ToString("N1") uur</td>
                                     <td>@vehicle.DemandKwh.ToString("N0")</td>
-                                    <td><strong>@vehicle.RequiredKw.ToString("N0")</strong></td>
+                                    <td><strong>@FormatPower(vehicle.RequiredKw)</strong></td>
                                 </tr>
                             }
                         </tbody>
@@ -1225,7 +1229,7 @@
         SelectDemandBlock(cell.DayIndex, cell.Hour);
         DemandPopup = new VehicleDemandPopup(
             cell.Label,
-            $"{cell.Vehicles:N0} voertuigen · {cell.RequiredKw:N0} kW gevraagd",
+            $"{cell.Vehicles:N0} voertuigen · {FormatPower(cell.RequiredKw)} gevraagd",
             cell.VehicleDemands
                 .Select(vehicle => new VehicleDemandPopupRow(
                     vehicle.Wagencode,
@@ -1246,7 +1250,7 @@
         var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
         DemandPopup = new VehicleDemandPopup(
             $"{profile.Name} · {titleDate}",
-            $"{detailCell.Vehicles:N0} voertuigen · {detailCell.RequiredKw:N0} kW gevraagd · {demandKwh:N0} kWh",
+            $"{detailCell.Vehicles:N0} voertuigen · {FormatPower(detailCell.RequiredKw)} gevraagd · {demandKwh:N0} kWh",
             detailCell.VehicleDemands
                 .Select(vehicle => new VehicleDemandPopupRow(
                     vehicle.Wagencode,
@@ -1392,6 +1396,22 @@
 
     private static string FormatNumber(double? value) => value is null ? "-" : value.Value.ToString("N0");
     private static string FormatNumber(long? value) => value is null ? "-" : value.Value.ToString("N0");
+
+    private static string FormatPower(double kw)
+    {
+        if (kw <= 0)
+        {
+            return "0 kW";
+        }
+
+        if (kw < 1000)
+        {
+            return $"{kw:N0} kW";
+        }
+
+        var mw = kw / 1000.0;
+        return mw >= 100 ? $"{mw:N0} MW" : $"{mw:N1} MW";
+    }
 
     private sealed record VehicleDemandPopup(
         string Title,

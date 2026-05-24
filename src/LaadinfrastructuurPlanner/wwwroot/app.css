@@ -1121,9 +1121,28 @@ td span {
   overflow: hidden;
 }
 
+.power-method-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--eta-border);
+  border-radius: 8px;
+  background: #fffaf0;
+  color: var(--eta-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.power-method-strip strong {
+  color: var(--eta-purple);
+}
+
 .power-heatmap {
   display: grid;
-  grid-template-columns: minmax(160px, 260px) repeat(24, minmax(28px, 1fr));
+  grid-template-columns: minmax(160px, 260px) repeat(24, minmax(54px, 1fr));
   gap: 3px;
   align-items: stretch;
   overflow-x: auto;
@@ -1168,7 +1187,7 @@ td span {
 .power-cell {
   display: grid;
   place-items: center;
-  min-width: 28px;
+  min-width: 54px;
   padding: 0;
   border-radius: 5px;
   background: rgba(249, 188, 19, var(--power-alpha, 0));
@@ -1227,16 +1246,17 @@ td span {
 
 .power-bars {
   display: grid;
-  grid-template-columns: repeat(24, minmax(18px, 1fr));
+  grid-template-columns: repeat(24, minmax(44px, 1fr));
   align-items: end;
   gap: 4px;
   min-height: 190px;
+  overflow-x: auto;
   padding-top: 8px;
 }
 
 .power-bar {
   height: 170px;
-  min-width: 0;
+  min-width: 44px;
   padding: 0 2px 4px;
   border: 1px solid var(--eta-border);
   border-radius: 6px;
