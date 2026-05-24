@@ -154,11 +154,36 @@ public sealed class OriginalCsvImportTests : IDisposable
         Assert.Equal("own", powerVehicle.VehicleClass);
         Assert.Equal(590, powerVehicle.DemandKwh);
         Assert.Equal(182, powerVehicle.RequiredKw);
-        Assert.Equal(3.2, powerVehicle.StandingHours);
+        Assert.Equal(3.25, powerVehicle.StandingHours);
         Assert.Equal(new DateOnly(2026, 1, 1), hour23.Date);
         Assert.NotEmpty(detail.DailyMetrics);
         Assert.Contains(detail.Scenarios, s => s.Year == 2027 && s.HourlyProfile.Length == 24);
         Assert.Contains(detail.Scenarios, s => s.Year == 2030 && s.Mode == "linear");
+
+        var cappedCharter = await service.GetPowerProfilesAsync(new PowerProfileRequest
+        {
+            DateFrom = new DateOnly(2026, 1, 1),
+            DateTo = new DateOnly(2026, 1, 2),
+            VehicleClasses = ["charter"],
+            TopLocations = 5,
+            CapacityKwh = 590,
+            MaxVehicleKw = 400,
+        });
+        var cappedDepot = Assert.Single(cappedCharter.Locations);
+        Assert.Equal("Depot B", cappedDepot.Address);
+        Assert.Equal(400, cappedDepot.PeakKw);
+
+        var mcsCharter = await service.GetPowerProfilesAsync(new PowerProfileRequest
+        {
+            DateFrom = new DateOnly(2026, 1, 1),
+            DateTo = new DateOnly(2026, 1, 2),
+            VehicleClasses = ["charter"],
+            TopLocations = 5,
+            CapacityKwh = 590,
+            MaxVehicleKw = 1500,
+        });
+        var mcsDepot = Assert.Single(mcsCharter.Locations);
+        Assert.Equal(787, mcsDepot.PeakKw);
 
         var diagnostics = await service.GetPowerDiagnosticsAsync(new AnalysisFilter());
         Assert.True(diagnostics.RoutesWithoutWaitWindow > 0);

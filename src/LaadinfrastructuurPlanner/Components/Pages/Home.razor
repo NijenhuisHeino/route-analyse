@@ -95,6 +95,8 @@
                 Batterijcapaciteit (kWh)
                 <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" />
             </label>
+            <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" /> MCS laden toestaan</label>
+            <span class="range-value">Max. afname per truck: @MaxVehicleKw.ToString("N0") kW</span>
             <label>
                 Doel laadniveau (%)
                 <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" />
@@ -200,7 +202,7 @@
                 {
                     <div class="power-method-strip">
                         <strong>Berekening</strong>
-                        <span>Per truck: @ScenarioCapacityKwh.ToString("N0") kWh / stilstanduren op locatie. Cellen tonen de hoogste uurpiek in de selectie.</span>
+                        <span>Per truck: @ScenarioCapacityKwh.ToString("N0") kWh / stilstanduren, begrensd op @MaxVehicleKw.ToString("N0") kW voertuigacceptatie. Cellen tonen de hoogste uurpiek in de selectie.</span>
                     </div>
                     <div class="power-heatmap" aria-label="Standplaats per uur vermogensvraag">
                         <div class="power-grid-corner"></div>
@@ -754,7 +756,7 @@
                                     <td>@DisplayValue(vehicle.Kenteken)</td>
                                     <td>@DisplayValue(vehicle.VehicleClass)</td>
                                     <td>@DisplayValue(vehicle.Window)</td>
-                                    <td>@vehicle.StandingHours.ToString("N1") uur</td>
+                                    <td>@FormatStandingDuration(vehicle.StandingHours)</td>
                                     <td>@vehicle.DemandKwh.ToString("N0")</td>
                                     <td><strong>@FormatPower(vehicle.RequiredKw)</strong></td>
                                 </tr>
@@ -808,6 +810,7 @@
     private int MinDepotVehicles { get; set; } = 5;
     private double ScenarioKwhPerKm { get; set; } = 1.2;
     private double ScenarioCapacityKwh { get; set; } = 590;
+    private bool ScenarioMcsEnabled { get; set; }
     private double ScenarioTargetSocPct { get; set; } = 80;
     private double ScenarioKwPerPlug { get; set; } = 350;
     private int ScenarioPlugs { get; set; } = 4;
@@ -817,6 +820,7 @@
     private bool ChargerAccessPublic { get; set; } = true;
     private bool ChargerAccessSemiPublic { get; set; } = true;
     private bool ChargerAccessPrivate { get; set; }
+    private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
 
     protected override async Task OnInitializedAsync()
     {
@@ -913,7 +917,8 @@
             TopLocations = 5,
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
-            CapacityKwh = ScenarioCapacityKwh
+            CapacityKwh = ScenarioCapacityKwh,
+            MaxVehicleKw = MaxVehicleKw
         });
         PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
     }
@@ -933,7 +938,8 @@
             LocationId = locationId,
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
-            CapacityKwh = ScenarioCapacityKwh
+            CapacityKwh = ScenarioCapacityKwh,
+            MaxVehicleKw = MaxVehicleKw
         });
     }
 
@@ -1411,6 +1417,27 @@
 
         var mw = kw / 1000.0;
         return mw >= 100 ? $"{mw:N0} MW" : $"{mw:N1} MW";
+    }
+
+    private static string FormatStandingDuration(double hours)
+    {
+        if (hours <= 0)
+        {
+            return "0 min";
+        }
+
+        var minutes = hours * 60.0;
+        if (minutes < 10)
+        {
+            return $"{minutes:N1} min";
+        }
+
+        if (minutes < 120)
+        {
+            return $"{minutes:N0} min";
+        }
+
+        return $"{hours:N1} uur";
     }
 
     private sealed record VehicleDemandPopup(
