@@ -197,6 +197,14 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(168, detail.Charging.WeeklyProfile.Length);
         Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 15);
         Assert.Contains(detail.Charging.WeeklyProfile, cell => cell.DayLabel == "Donderdag" && cell.Hour == 18 && cell.Vehicles == 1 && cell.RequiredKw == 15 && cell.Wagencodes.Contains("W1"));
+        var thursday18 = Assert.Single(detail.Charging.WeeklyProfile, cell => cell.DayLabel == "Donderdag" && cell.Hour == 18);
+        var vehicleDemand = Assert.Single(thursday18.VehicleDemands);
+        Assert.Equal("W1", vehicleDemand.Wagencode);
+        Assert.Equal("-", vehicleDemand.Kenteken);
+        Assert.Equal(15, vehicleDemand.RequiredKw);
+        Assert.Equal(180, vehicleDemand.DemandKwh);
+        Assert.Equal(12, vehicleDemand.StandingHours);
+        Assert.Contains("18:00-06:00", vehicleDemand.Window);
         Assert.Contains(detail.Charging.WeeklyProfile, cell => cell.Vehicles == 0 && cell.RequiredKw == 0);
         var vehicle = Assert.Single(detail.Vehicles);
         Assert.Equal(1, vehicle.Days);

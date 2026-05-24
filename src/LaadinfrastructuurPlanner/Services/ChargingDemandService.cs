@@ -658,6 +658,8 @@ public sealed partial class RouteAnalysisService
                     {
                         accumulator.Wagencodes.Add(load.Row.Wagencode);
                     }
+
+                    accumulator.AddVehicleDemand(load);
                 }
 
                 cursor = next;
@@ -675,6 +677,13 @@ public sealed partial class RouteAnalysisService
                 slot.Value.RequiredKw,
                 Kentekens = slot.Value.Kentekens.Order(StringComparer.OrdinalIgnoreCase).Take(40).ToArray(),
                 Wagencodes = slot.Value.Wagencodes.Order(StringComparer.OrdinalIgnoreCase).Take(40).ToArray(),
+                VehicleDemands = slot.Value.VehicleDemands
+                    .Values
+                    .OrderByDescending(x => x.RequiredKw)
+                    .ThenBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(x => x.Kenteken, StringComparer.OrdinalIgnoreCase)
+                    .Select(x => x.ToRow())
+                    .ToArray(),
             })
             .GroupBy(x => (x.DayIndex, x.Hour))
             .Select(group => group
@@ -702,7 +711,8 @@ public sealed partial class RouteAnalysisService
                     Math.Round(requiredKw, 0),
                     Math.Round(requiredKw / 1000.0, 2),
                     peak?.Kentekens ?? [],
-                    peak?.Wagencodes ?? []);
+                    peak?.Wagencodes ?? [],
+                    peak?.VehicleDemands ?? []);
             }))
             .ToArray();
     }
@@ -1224,8 +1234,62 @@ public sealed partial class RouteAnalysisService
         public HashSet<string> VehicleKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Kentekens { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Wagencodes { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, VehicleDemandAccumulator> VehicleDemands { get; } = new(StringComparer.OrdinalIgnoreCase);
         public long Events { get; set; }
         public double DemandKwh { get; set; }
         public double RequiredKw { get; set; }
+
+        public void AddVehicleDemand(DemandEventLoad load)
+        {
+            var key = VehicleGroupKey(load.Row);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                key = $"{load.Row.Wagencode}|{load.Row.Kentekens}|{load.Row.StartTime:O}";
+            }
+
+            if (!VehicleDemands.TryGetValue(key, out var vehicle))
+            {
+                vehicle = new VehicleDemandAccumulator(load.Row.Wagencode, SplitLicensePlates(load.Row.Kentekens).FirstOrDefault() ?? "-");
+                VehicleDemands[key] = vehicle;
+            }
+
+            vehicle.DemandKwh += load.DemandKwh;
+            vehicle.RequiredKw += load.RequiredKw;
+            vehicle.StandingHours = Math.Max(vehicle.StandingHours, load.Row.GapHours);
+            if (vehicle.StartTime == DateTime.MinValue || load.Row.StartTime < vehicle.StartTime)
+            {
+                vehicle.StartTime = load.Row.StartTime;
+            }
+
+            if (load.Row.EndTime > vehicle.EndTime)
+            {
+                vehicle.EndTime = load.Row.EndTime;
+            }
+        }
+    }
+
+    private sealed class VehicleDemandAccumulator(string wagencode, string kenteken)
+    {
+        public string Wagencode { get; } = wagencode;
+        public string Kenteken { get; } = kenteken;
+        public double DemandKwh { get; set; }
+        public double RequiredKw { get; set; }
+        public double StandingHours { get; set; }
+        public DateTime StartTime { get; set; }
+        public DateTime EndTime { get; set; }
+
+        public WeeklyDemandVehicle ToRow()
+        {
+            var window = StartTime == DateTime.MinValue || EndTime == DateTime.MinValue
+                ? ""
+                : $"{StartTime:HH:mm}-{EndTime:HH:mm}";
+            return new WeeklyDemandVehicle(
+                Wagencode,
+                Kenteken,
+                Math.Round(DemandKwh, 0),
+                Math.Round(RequiredKw, 0),
+                Math.Round(StandingHours, 1),
+                window);
+        }
     }
 }

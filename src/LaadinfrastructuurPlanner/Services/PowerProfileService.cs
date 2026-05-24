@@ -26,7 +26,7 @@ public sealed partial class RouteAnalysisService
         {
             using var connection = OpenConnection();
             var events = ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken));
-            var profiles = BuildLocationProfiles(events, normalized.CapacityKwh)
+            var profiles = BuildLocationProfiles(events, normalized.CapacityKwh, includeVehicleDemands: false)
                 .OrderByDescending(x => x.PeakKw)
                 .ThenByDescending(x => x.UniqueVehicles)
                 .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
@@ -65,7 +65,7 @@ public sealed partial class RouteAnalysisService
             var events = ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken))
                 .Where(x => string.Equals(x.LocationId, normalized.LocationId, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
-            var profile = BuildLocationProfiles(events, normalized.CapacityKwh).FirstOrDefault();
+            var profile = BuildLocationProfiles(events, normalized.CapacityKwh, includeVehicleDemands: true).FirstOrDefault();
             var daily = BuildDailyMetrics(events, normalized.CapacityKwh);
             var scenarios = BuildScenarioProfiles(events, normalized);
             return new PowerLocationProfileResponse(
@@ -364,14 +364,14 @@ public sealed partial class RouteAnalysisService
         return windows.ToArray();
     }
 
-    private PowerLocationProfile[] BuildLocationProfiles(IReadOnlyList<PowerEvent> events, double capacityKwh)
+    private PowerLocationProfile[] BuildLocationProfiles(IReadOnlyList<PowerEvent> events, double capacityKwh, bool includeVehicleDemands)
     {
         return events
             .Where(x => x.StartTime != DateTime.MinValue && x.EndTime > x.StartTime)
             .GroupBy(x => x.LocationId, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
-                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh);
+                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, includeVehicleDemands);
                 var peak = hourly.Length == 0 ? 0 : hourly.Max(x => x.RequiredKw);
                 return new PowerLocationProfile(
                     group.Key,
@@ -398,7 +398,7 @@ public sealed partial class RouteAnalysisService
             .OrderBy(x => x.Key)
             .Select(group =>
             {
-                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh);
+                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, includeVehicleDemands: false);
                 return new PowerDailyMetric(
                     group.Key,
                     group.Select(x => x.VehicleKey).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
@@ -412,7 +412,7 @@ public sealed partial class RouteAnalysisService
             .ToArray();
     }
 
-    private PowerHourlyCell[] BuildHourlyPowerProfile(IReadOnlyList<PowerEvent> events, double capacityKwh)
+    private PowerHourlyCell[] BuildHourlyPowerProfile(IReadOnlyList<PowerEvent> events, double capacityKwh, bool includeVehicleDemands = false)
     {
         var slots = new Dictionary<DateTime, PowerAccumulator>();
         foreach (var powerEvent in events)
@@ -435,6 +435,10 @@ public sealed partial class RouteAnalysisService
                     accumulator.Vehicles.Add(powerEvent.VehicleKey);
                     accumulator.Events++;
                     accumulator.RequiredKw += powerKw;
+                    if (includeVehicleDemands)
+                    {
+                        accumulator.AddVehicleDemand(powerEvent, capacityKwh, powerKw);
+                    }
                 }
 
                 cursor = next;
@@ -448,6 +452,16 @@ public sealed partial class RouteAnalysisService
                 Vehicles = slot.Value.Vehicles.LongCount(),
                 slot.Value.Events,
                 slot.Value.RequiredKw,
+                Date = slot.Key,
+                VehicleDemands = includeVehicleDemands
+                    ? slot.Value.VehicleDemands
+                        .Values
+                        .OrderByDescending(x => x.RequiredKw)
+                        .ThenBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(x => x.Kenteken, StringComparer.OrdinalIgnoreCase)
+                        .Select(x => x.ToRow())
+                        .ToArray()
+                    : [],
             })
             .GroupBy(x => x.Hour)
             .Select(group => group.OrderByDescending(x => x.RequiredKw).ThenByDescending(x => x.Vehicles).First())
@@ -464,7 +478,9 @@ public sealed partial class RouteAnalysisService
                     peak?.Vehicles ?? 0,
                     peak?.Events ?? 0,
                     requiredKw,
-                    Math.Round(requiredKw / 1000.0, 2));
+                    Math.Round(requiredKw / 1000.0, 2),
+                    peak is null ? null : DateOnly.FromDateTime(peak.Date),
+                    peak?.VehicleDemands ?? []);
             })
             .ToArray();
     }
@@ -882,8 +898,64 @@ public sealed partial class RouteAnalysisService
     private sealed class PowerAccumulator
     {
         public HashSet<string> Vehicles { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, PowerVehicleDemandAccumulator> VehicleDemands { get; } = new(StringComparer.OrdinalIgnoreCase);
         public long Events { get; set; }
         public double RequiredKw { get; set; }
+
+        public void AddVehicleDemand(PowerEvent powerEvent, double demandKwh, double requiredKw)
+        {
+            var key = string.IsNullOrWhiteSpace(powerEvent.VehicleKey)
+                ? $"{powerEvent.Wagencode}|{powerEvent.Kenteken}|{powerEvent.StartTime:O}"
+                : powerEvent.VehicleKey;
+            if (!VehicleDemands.TryGetValue(key, out var vehicle))
+            {
+                vehicle = new PowerVehicleDemandAccumulator(
+                    string.IsNullOrWhiteSpace(powerEvent.Wagencode) ? "-" : powerEvent.Wagencode,
+                    string.IsNullOrWhiteSpace(powerEvent.Kenteken) ? "-" : powerEvent.Kenteken,
+                    string.IsNullOrWhiteSpace(powerEvent.VehicleClass) ? "unknown" : powerEvent.VehicleClass);
+                VehicleDemands[key] = vehicle;
+            }
+
+            vehicle.DemandKwh += demandKwh;
+            vehicle.RequiredKw += requiredKw;
+            vehicle.StandingHours = Math.Max(vehicle.StandingHours, (powerEvent.EndTime - powerEvent.StartTime).TotalHours);
+            if (vehicle.StartTime == DateTime.MinValue || powerEvent.StartTime < vehicle.StartTime)
+            {
+                vehicle.StartTime = powerEvent.StartTime;
+            }
+
+            if (powerEvent.EndTime > vehicle.EndTime)
+            {
+                vehicle.EndTime = powerEvent.EndTime;
+            }
+        }
+    }
+
+    private sealed class PowerVehicleDemandAccumulator(string wagencode, string kenteken, string vehicleClass)
+    {
+        public string Wagencode { get; } = wagencode;
+        public string Kenteken { get; } = kenteken;
+        public string VehicleClass { get; } = vehicleClass;
+        public double DemandKwh { get; set; }
+        public double RequiredKw { get; set; }
+        public double StandingHours { get; set; }
+        public DateTime StartTime { get; set; }
+        public DateTime EndTime { get; set; }
+
+        public PowerHourlyVehicle ToRow()
+        {
+            var window = StartTime == DateTime.MinValue || EndTime == DateTime.MinValue
+                ? ""
+                : $"{StartTime:HH:mm}-{EndTime:HH:mm}";
+            return new PowerHourlyVehicle(
+                Wagencode,
+                Kenteken,
+                VehicleClass,
+                Math.Round(DemandKwh, 0),
+                Math.Round(RequiredKw, 0),
+                Math.Round(StandingHours, 1),
+                window);
+        }
     }
 }
 

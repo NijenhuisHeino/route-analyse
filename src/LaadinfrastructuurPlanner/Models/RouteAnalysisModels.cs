@@ -266,7 +266,16 @@ public sealed record WeeklyDemandCell(
     double RequiredKw,
     double RequiredMw,
     string[] Kentekens,
-    string[] Wagencodes);
+    string[] Wagencodes,
+    WeeklyDemandVehicle[] VehicleDemands);
+
+public sealed record WeeklyDemandVehicle(
+    string Wagencode,
+    string Kenteken,
+    double DemandKwh,
+    double RequiredKw,
+    double StandingHours,
+    string Window);
 
 public sealed record ChargingProfile(
     long Events,
@@ -299,7 +308,18 @@ public sealed record PowerHourlyCell(
     long Vehicles,
     long Events,
     double RequiredKw,
-    double RequiredMw);
+    double RequiredMw,
+    DateOnly? Date,
+    PowerHourlyVehicle[] VehicleDemands);
+
+public sealed record PowerHourlyVehicle(
+    string Wagencode,
+    string Kenteken,
+    string VehicleClass,
+    double DemandKwh,
+    double RequiredKw,
+    double StandingHours,
+    string Window);
 
 public sealed record PowerHeatmapCell(
     string LocationId,

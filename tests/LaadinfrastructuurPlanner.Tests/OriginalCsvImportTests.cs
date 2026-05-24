@@ -147,6 +147,15 @@ public sealed class OriginalCsvImportTests : IDisposable
 
         Assert.Equal("ok", detail.Status);
         Assert.Equal(nieuwegein.LocationId, detail.Profile?.LocationId);
+        var hour23 = Assert.Single(detail.Profile!.HourlyProfile, h => h.Hour == 23);
+        var powerVehicle = Assert.Single(hour23.VehicleDemands);
+        Assert.Equal("001", powerVehicle.Wagencode);
+        Assert.Equal("11-BZX-8", powerVehicle.Kenteken);
+        Assert.Equal("own", powerVehicle.VehicleClass);
+        Assert.Equal(590, powerVehicle.DemandKwh);
+        Assert.Equal(182, powerVehicle.RequiredKw);
+        Assert.Equal(3.2, powerVehicle.StandingHours);
+        Assert.Equal(new DateOnly(2026, 1, 1), hour23.Date);
         Assert.NotEmpty(detail.DailyMetrics);
         Assert.Contains(detail.Scenarios, s => s.Year == 2027 && s.HourlyProfile.Length == 24);
         Assert.Contains(detail.Scenarios, s => s.Year == 2030 && s.Mode == "linear");

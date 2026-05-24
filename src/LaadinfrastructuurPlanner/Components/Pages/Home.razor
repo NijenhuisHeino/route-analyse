@@ -214,7 +214,7 @@
                                 <button class="power-cell"
                                         style="@PowerCellStyle(cell.RequiredKw, PowerProfiles.Locations)"
                                         title="@($"{cell.Label}: {cell.RequiredKw:N0} kW · {cell.Vehicles:N0} voertuigen")"
-                                        @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
+                                        @onclick="() => OpenPowerDemandPopupAsync(profile, cell)">
                                     <span>@(cell.RequiredKw > 0 ? cell.RequiredKw.ToString("N0") : "")</span>
                                 </button>
                             }
@@ -478,7 +478,7 @@
                                     <button class="@WeekCellClass(cell)"
                                             style="@WeekCellStyle(cell)"
                                             title="@($"{cell.Label}: {cell.Vehicles:N0} voertuigen, {cell.RequiredKw:N0} kW gevraagd")"
-                                            @onclick="() => SelectDemandBlock(cell.DayIndex, cell.Hour)">
+                                            @onclick="() => OpenDemandPopup(cell)">
                                         <span>@cell.RequiredKw.ToString("N0")</span>
                                     </button>
                                 }
@@ -659,6 +659,57 @@
     </main>
 </div>
 
+@if (DemandPopup is not null)
+{
+    <div class="demand-modal-backdrop" role="presentation" @onclick="CloseDemandPopup">
+        <section class="demand-modal" role="dialog" aria-modal="true" aria-labelledby="demand-modal-title" @onclick:stopPropagation>
+            <div class="demand-modal__heading">
+                <div>
+                    <h3 id="demand-modal-title">@DemandPopup.Title</h3>
+                    <span>@DemandPopup.Subtitle</span>
+                </div>
+                <button type="button" class="icon-button" aria-label="Sluiten" title="Sluiten" @onclick="CloseDemandPopup">&times;</button>
+            </div>
+            @if (DemandPopup.Rows.Length == 0)
+            {
+                <p class="demand-modal__empty">Geen voertuigen aanwezig in dit uurblok.</p>
+            }
+            else
+            {
+                <div class="demand-modal__table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Voertuig</th>
+                                <th>Kenteken</th>
+                                <th>Klasse</th>
+                                <th>Venster</th>
+                                <th>Stilstand</th>
+                                <th>kWh</th>
+                                <th>kW</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var vehicle in DemandPopup.Rows)
+                            {
+                                <tr>
+                                    <td><strong>@DisplayValue(vehicle.Wagencode)</strong></td>
+                                    <td>@DisplayValue(vehicle.Kenteken)</td>
+                                    <td>@DisplayValue(vehicle.VehicleClass)</td>
+                                    <td>@DisplayValue(vehicle.Window)</td>
+                                    <td>@vehicle.StandingHours.ToString("N1") uur</td>
+                                    <td>@vehicle.DemandKwh.ToString("N0")</td>
+                                    <td><strong>@vehicle.RequiredKw.ToString("N0")</strong></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+}
+
 @code {
     private MetadataResponse? Metadata { get; set; }
     private SummaryResponse? Summary { get; set; }
@@ -679,6 +730,7 @@
     private StopLocationDetailRequest? SelectedStopLocation { get; set; }
     private int? SelectedDemandDay { get; set; }
     private int? SelectedDemandHour { get; set; }
+    private VehicleDemandPopup? DemandPopup { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
     private string DateFromText { get; set; } = "";
@@ -754,6 +806,7 @@
         SelectedStopLocation = null;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
+        DemandPopup = null;
         await ClearSelectionHeatAsync();
 
         try
@@ -961,6 +1014,7 @@
         SelectedStopLocation = null;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
+        DemandPopup = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -979,6 +1033,7 @@
         SelectedRoad = null;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
+        DemandPopup = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -991,6 +1046,7 @@
         SelectedStopLocation = null;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
+        DemandPopup = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -1111,6 +1167,50 @@
         SelectedDemandHour = hour;
     }
 
+    private void OpenDemandPopup(WeeklyDemandCell cell)
+    {
+        SelectDemandBlock(cell.DayIndex, cell.Hour);
+        DemandPopup = new VehicleDemandPopup(
+            cell.Label,
+            $"{cell.Vehicles:N0} voertuigen · {cell.RequiredKw:N0} kW gevraagd",
+            cell.VehicleDemands
+                .Select(vehicle => new VehicleDemandPopupRow(
+                    vehicle.Wagencode,
+                    vehicle.Kenteken,
+                    "",
+                    vehicle.DemandKwh,
+                    vehicle.RequiredKw,
+                    vehicle.StandingHours,
+                    vehicle.Window))
+                .ToArray());
+    }
+
+    private async Task OpenPowerDemandPopupAsync(PowerLocationProfile profile, PowerHourlyCell cell)
+    {
+        await SelectPowerLocationAsync(profile.LocationId);
+        var detailCell = SelectedPowerProfile?.Profile?.HourlyProfile.FirstOrDefault(x => x.Hour == cell.Hour) ?? cell;
+        var titleDate = detailCell.Date is null ? detailCell.Label : $"{detailCell.Date.Value:dd-MM-yyyy} {detailCell.Label}";
+        var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
+        DemandPopup = new VehicleDemandPopup(
+            $"{profile.Name} · {titleDate}",
+            $"{detailCell.Vehicles:N0} voertuigen · {detailCell.RequiredKw:N0} kW gevraagd · {demandKwh:N0} kWh",
+            detailCell.VehicleDemands
+                .Select(vehicle => new VehicleDemandPopupRow(
+                    vehicle.Wagencode,
+                    vehicle.Kenteken,
+                    vehicle.VehicleClass,
+                    vehicle.DemandKwh,
+                    vehicle.RequiredKw,
+                    vehicle.StandingHours,
+                    vehicle.Window))
+                .ToArray());
+    }
+
+    private void CloseDemandPopup()
+    {
+        DemandPopup = null;
+    }
+
     private WeeklyDemandCell? SelectedWeeklyDemandCell()
     {
         if (SelectedDetail is null || SelectedDetail.Charging.WeeklyProfile.Length == 0)
@@ -1182,6 +1282,11 @@
             : string.Join(", ", visible) + $" +{values.Count - maxVisible}";
     }
 
+    private static string DisplayValue(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "-" : value;
+    }
+
     private int EmptyWeekCellCount()
     {
         return SelectedDetail?.Charging.WeeklyProfile.Count(x => x.RequiredKw <= 0 && x.Vehicles <= 0) ?? 0;
@@ -1218,6 +1323,20 @@
 
     private static string FormatNumber(double? value) => value is null ? "-" : value.Value.ToString("N0");
     private static string FormatNumber(long? value) => value is null ? "-" : value.Value.ToString("N0");
+
+    private sealed record VehicleDemandPopup(
+        string Title,
+        string Subtitle,
+        VehicleDemandPopupRow[] Rows);
+
+    private sealed record VehicleDemandPopupRow(
+        string Wagencode,
+        string Kenteken,
+        string VehicleClass,
+        double DemandKwh,
+        double RequiredKw,
+        double StandingHours,
+        string Window);
 
     public void Dispose()
     {
