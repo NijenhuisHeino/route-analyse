@@ -1,0 +1,7 @@
+name,lat,lon,source
+# Manual override file for fleet depot coordinates. Place at <repoRoot>/data/fleet_geocoded.csv
+# or point at it via ROUTE_ANALYSIS_GEOCODING_OVERRIDE env var.
+# These coordinates take precedence over Nominatim geocoding.
+# Example:
+PostNL Nieuwegein,52.0234,5.1037,manual
+PostNL Den Hoorn,52.0102,4.2944,manual

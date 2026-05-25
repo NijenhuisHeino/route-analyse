@@ -48,7 +48,7 @@ public sealed class OriginalCsvImportTests : IDisposable
             Scenario = new ChargingScenario { KwhPerKm = 1.0, CapacityKwh = 200, TargetSocPct = 80, MinSocPct = 15 }
         });
         var depot = Assert.Single(locations.Locations);
-        Assert.Equal("auto:52.000:5.000", depot.DepotId);
+        Assert.Equal("auto:52.0000:5.0000", depot.DepotId);
         Assert.Equal(180, depot.P95DayKm);
 
         var detail = await service.GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest { DepotId = depot.DepotId });

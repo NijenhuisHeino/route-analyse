@@ -296,6 +296,7 @@ public record PowerProfileRequest : AnalysisFilter
     public string ScenarioMode { get; init; } = "linear";
     public double CapacityKwh { get; init; } = 590;
     public double MaxVehicleKw { get; init; } = 400;
+    public double SiteLimitMw { get; init; } = 1.4;
 }
 
 public sealed record PowerLocationProfileRequest : PowerProfileRequest
@@ -311,7 +312,8 @@ public sealed record PowerHourlyCell(
     double RequiredKw,
     double RequiredMw,
     DateOnly? Date,
-    PowerHourlyVehicle[] VehicleDemands);
+    PowerHourlyVehicle[] VehicleDemands,
+    bool AnomalyFlag = false);
 
 public sealed record PowerHourlyVehicle(
     string Wagencode,
@@ -328,7 +330,8 @@ public sealed record PowerHeatmapCell(
     int Hour,
     long Vehicles,
     double RequiredKw,
-    double RequiredMw);
+    double RequiredMw,
+    bool AnomalyFlag = false);
 
 public sealed record PowerDailyMetric(
     DateOnly Date,
@@ -338,7 +341,8 @@ public sealed record PowerDailyMetric(
     long Trips,
     long Events,
     double AvgDwellMin,
-    double PeakKw);
+    double PeakKw,
+    bool AnomalyFlag = false);
 
 public sealed record PowerLocationProfile(
     string LocationId,
@@ -510,3 +514,59 @@ public sealed record FleetDepotsResponse(
     string Disclaimer,
     long TotalVehicles,
     FleetDepot[] Depots);
+
+public sealed record DataQualityIssue(
+    string Code,
+    string Description,
+    long Count,
+    double Percent,
+    string Severity);
+
+public sealed record DataQualityReport(
+    string Status,
+    string? Message,
+    long TotalRows,
+    long DistinctVehicles,
+    long DistinctTrips,
+    DateOnly? FirstDate,
+    DateOnly? LastDate,
+    DataQualityIssue[] Issues,
+    long ProcessedAtUnix);
+
+public sealed record SensitivityCell(
+    string ScenarioName,
+    double KwhPerKm,
+    double MinSocPct,
+    double TargetSocPct,
+    double FleetScale,
+    double PeakMw,
+    double TotalMwh,
+    double ShortageMwh);
+
+public sealed record SensitivityResponse(
+    string Status,
+    string? Message,
+    string LocationId,
+    string LocationName,
+    SensitivityCell[] Cells,
+    double PeakMwP10,
+    double PeakMwP50,
+    double PeakMwP90,
+    double ShortageMwhP10,
+    double ShortageMwhP50,
+    double ShortageMwhP90);
+
+public sealed record VehicleEnergyAssumption(
+    string VehicleClass,
+    string Season,
+    double KwhPerKm);
+
+public sealed record CorridorHotspot(
+    string SegmentId,
+    double Lat,
+    double Lon,
+    string Description,
+    long Trips,
+    long UniqueVehicles,
+    double TotalCorridorMwh,
+    int NearestPublicChargerKm);

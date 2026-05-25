@@ -26,7 +26,7 @@ public sealed partial class RouteAnalysisService
         {
             using var connection = OpenConnection();
             var events = MergeOverlappingPresenceWindows(ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken)));
-            var profiles = BuildLocationProfiles(events, normalized.CapacityKwh, normalized.MaxVehicleKw, includeVehicleDemands: false)
+            var profiles = BuildLocationProfiles(events, normalized.CapacityKwh, normalized.MaxVehicleKw, normalized.SiteLimitMw, includeVehicleDemands: false)
                 .OrderByDescending(x => x.PeakKw)
                 .ThenByDescending(x => x.UniqueVehicles)
                 .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
@@ -40,7 +40,8 @@ public sealed partial class RouteAnalysisService
                     hour.Hour,
                     hour.Vehicles,
                     hour.RequiredKw,
-                    hour.RequiredMw)))
+                    hour.RequiredMw,
+                    hour.AnomalyFlag)))
                 .ToArray();
             var scenarios = BuildScenarioProfiles(events.Where(x => selectedIds.Contains(x.LocationId)).ToArray(), normalized);
             return new PowerProfileResponse("ok", null, profiles, heatmap, scenarios, true);
@@ -65,8 +66,8 @@ public sealed partial class RouteAnalysisService
             var events = MergeOverlappingPresenceWindows(ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken)))
                 .Where(x => string.Equals(x.LocationId, normalized.LocationId, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
-            var profile = BuildLocationProfiles(events, normalized.CapacityKwh, normalized.MaxVehicleKw, includeVehicleDemands: true).FirstOrDefault();
-            var daily = BuildDailyMetrics(events, normalized.CapacityKwh, normalized.MaxVehicleKw);
+            var profile = BuildLocationProfiles(events, normalized.CapacityKwh, normalized.MaxVehicleKw, normalized.SiteLimitMw, includeVehicleDemands: true).FirstOrDefault();
+            var daily = BuildDailyMetrics(events, normalized.CapacityKwh, normalized.MaxVehicleKw, normalized.SiteLimitMw);
             var scenarios = BuildScenarioProfiles(events, normalized);
             return new PowerLocationProfileResponse(
                 "ok",
@@ -220,17 +221,38 @@ public sealed partial class RouteAnalysisService
         }, cancellationToken);
 
         var files = new List<string>();
+        var meta = new ExportMetadata(
+            GeneratedAtUtc: DateTime.UtcNow,
+            SoftwareVersion: typeof(RouteAnalysisService).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+            FocusLocationId: selected.LocationId,
+            FocusLocationName: selected.Name,
+            FocusAddress: selected.Address,
+            CapacityKwh: 590,
+            MaxVehicleKw: 400,
+            SiteLimitMw: 1.4,
+            ScenarioYears: [2027, 2030],
+            VehicleClasses: ["own"],
+            EnergyAssumptions: _store.Options.VehicleEnergyAssumptions,
+            FleetRolloutMode: _store.Options.FleetRolloutMode,
+            ScenarioInflows: _store.Options.ScenarioInflows);
+
         var hourlyCsv = Path.Combine(outputDir, "nieuwegein_hourly_profile.csv");
         await File.WriteAllTextAsync(hourlyCsv, ToHourlyCsv(selected), cancellationToken);
         files.Add(hourlyCsv);
+        await WriteMetaAsync(hourlyCsv, meta, cancellationToken);
+        files.Add(hourlyCsv + ".meta.json");
 
         var dailyCsv = Path.Combine(outputDir, "nieuwegein_daily_metrics.csv");
         await File.WriteAllTextAsync(dailyCsv, ToDailyCsv(detail.DailyMetrics), cancellationToken);
         files.Add(dailyCsv);
+        await WriteMetaAsync(dailyCsv, meta, cancellationToken);
+        files.Add(dailyCsv + ".meta.json");
 
         var scenarioCsv = Path.Combine(outputDir, "nieuwegein_scenarios_2027_2030.csv");
         await File.WriteAllTextAsync(scenarioCsv, ToScenarioCsv(detail.Scenarios), cancellationToken);
         files.Add(scenarioCsv);
+        await WriteMetaAsync(scenarioCsv, meta, cancellationToken);
+        files.Add(scenarioCsv + ".meta.json");
 
         var html = Path.Combine(outputDir, "nieuwegein_power_report.html");
         await File.WriteAllTextAsync(html, BuildReportHtml(selected, detail), cancellationToken);
@@ -239,10 +261,14 @@ public sealed partial class RouteAnalysisService
         var combinedCsv = Path.Combine(outputDir, "top5_own_current_heatmap.csv");
         await File.WriteAllTextAsync(combinedCsv, ToHeatmapCsv(profiles.Heatmap), cancellationToken);
         files.Add(combinedCsv);
+        await WriteMetaAsync(combinedCsv, meta, cancellationToken);
+        files.Add(combinedCsv + ".meta.json");
 
         var parquet = Path.Combine(outputDir, "top5_own_current_heatmap.parquet");
         await WriteHeatmapParquetAsync(profiles.Heatmap, parquet, cancellationToken);
         files.Add(parquet);
+        await WriteMetaAsync(parquet, meta, cancellationToken);
+        files.Add(parquet + ".meta.json");
 
         var message = IsFocusLocation(selected)
             ? "Nieuwegein-export geschreven."
@@ -415,14 +441,14 @@ public sealed partial class RouteAnalysisService
             : powerEvent.VehicleKey;
     }
 
-    private PowerLocationProfile[] BuildLocationProfiles(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw, bool includeVehicleDemands)
+    private PowerLocationProfile[] BuildLocationProfiles(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw, double siteLimitMw, bool includeVehicleDemands)
     {
         return events
             .Where(x => x.StartTime != DateTime.MinValue && x.EndTime > x.StartTime)
             .GroupBy(x => x.LocationId, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
-                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, maxVehicleKw, includeVehicleDemands);
+                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, maxVehicleKw, siteLimitMw, includeVehicleDemands);
                 var peak = hourly.Length == 0 ? 0 : hourly.Max(x => x.RequiredKw);
                 return new PowerLocationProfile(
                     group.Key,
@@ -442,14 +468,14 @@ public sealed partial class RouteAnalysisService
             .ToArray();
     }
 
-    private PowerDailyMetric[] BuildDailyMetrics(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw)
+    private PowerDailyMetric[] BuildDailyMetrics(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw, double siteLimitMw)
     {
         return events
             .GroupBy(x => x.TripDate)
             .OrderBy(x => x.Key)
             .Select(group =>
             {
-                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, maxVehicleKw, includeVehicleDemands: false);
+                var hourly = BuildHourlyPowerProfile(group.ToArray(), capacityKwh, maxVehicleKw, siteLimitMw, includeVehicleDemands: false);
                 return new PowerDailyMetric(
                     group.Key,
                     group.Select(x => x.VehicleKey).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
@@ -458,13 +484,15 @@ public sealed partial class RouteAnalysisService
                     group.Select(x => x.TripId).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
                     group.LongCount(),
                     Math.Round(group.Average(x => x.DwellMin), 1),
-                    hourly.Length == 0 ? 0 : hourly.Max(x => x.RequiredKw));
+                    hourly.Length == 0 ? 0 : hourly.Max(x => x.RequiredKw),
+                    hourly.Any(x => x.AnomalyFlag));
             })
             .ToArray();
     }
 
-    private PowerHourlyCell[] BuildHourlyPowerProfile(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw, bool includeVehicleDemands = false)
+    private PowerHourlyCell[] BuildHourlyPowerProfile(IReadOnlyList<PowerEvent> events, double capacityKwh, double maxVehicleKw, double siteLimitMw, bool includeVehicleDemands = false)
     {
+        var siteLimitKw = siteLimitMw > 0 ? siteLimitMw * 1000.0 : double.PositiveInfinity;
         var slots = new Dictionary<DateTime, PowerAccumulator>();
         foreach (var powerEvent in events)
         {
@@ -522,7 +550,10 @@ public sealed partial class RouteAnalysisService
             .Select(hour =>
             {
                 peakPerHour.TryGetValue(hour, out var peak);
-                var requiredKw = Math.Round(peak?.RequiredKw ?? 0, 0);
+                var rawKw = peak?.RequiredKw ?? 0;
+                var cappedKw = Math.Min(rawKw, siteLimitKw);
+                var anomalyFlag = rawKw > siteLimitKw * 1.001;
+                var requiredKw = Math.Round(cappedKw, 0);
                 return new PowerHourlyCell(
                     hour,
                     $"{hour:00}:00",
@@ -531,7 +562,8 @@ public sealed partial class RouteAnalysisService
                     requiredKw,
                     Math.Round(requiredKw / 1000.0, 2),
                     peak is null ? null : DateOnly.FromDateTime(peak.Date),
-                    peak?.VehicleDemands ?? []);
+                    peak?.VehicleDemands ?? [],
+                    anomalyFlag);
             })
             .ToArray();
     }
@@ -540,27 +572,45 @@ public sealed partial class RouteAnalysisService
     {
         var years = request.ScenarioYears.Length == 0 ? [2027, 2030] : request.ScenarioYears;
         var currentVehicles = Math.Max(1, events.Select(x => x.VehicleKey).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        var baseHourly = BuildHourlyPowerProfile(events, request.CapacityKwh, request.MaxVehicleKw);
+        var baseHourly = BuildHourlyPowerProfile(events, request.CapacityKwh, request.MaxVehicleKw, request.SiteLimitMw);
+        var rolloutMode = _store.Options.FleetRolloutMode;
+        var k = _store.Options.FleetRolloutK;
+        var t0 = _store.Options.FleetRolloutT0Year;
+        var siteLimitKw = request.SiteLimitMw > 0 ? request.SiteLimitMw * 1000.0 : double.PositiveInfinity;
         return years
             .Select(year =>
             {
                 var inflow = _store.Options.ScenarioInflows.FirstOrDefault(x => x.Year == year) ?? new ScenarioInflowAssumption(year, 0, 0);
                 var scenarioVehicles = Math.Max(0, inflow.TractorCount + inflow.BoxTruckCount);
                 var scale = Math.Round(Math.Min(1.0, scenarioVehicles / (double)currentVehicles), 4);
+                var sigmoidScale = string.Equals(rolloutMode, "scurve", StringComparison.OrdinalIgnoreCase)
+                    ? Math.Round(1.0 / (1.0 + Math.Exp(-k * (year - t0))), 4)
+                    : (double?)null;
+                if (sigmoidScale is not null)
+                {
+                    scale = Math.Round(Math.Min(1.0, scale * sigmoidScale.Value * 2.0), 4);
+                }
                 var mode = NormalizeScenarioMode(request.ScenarioMode);
                 var source = mode == "cherry-pick"
-                    ? BuildHourlyPowerProfile(events.OrderByDescending(x => x.DwellMin).ThenBy(x => x.StartTime).Take(scenarioVehicles).ToArray(), request.CapacityKwh, request.MaxVehicleKw)
+                    ? BuildHourlyPowerProfile(events.OrderByDescending(x => x.DwellMin).ThenBy(x => x.StartTime).Take(scenarioVehicles).ToArray(), request.CapacityKwh, request.MaxVehicleKw, request.SiteLimitMw)
                     : baseHourly;
                 return new PowerScenarioProfile(
                     year,
-                    mode,
+                    sigmoidScale is null ? mode : mode + "+scurve",
                     scale,
-                    source.Select(cell => cell with
+                    source.Select(cell =>
                     {
-                        Vehicles = (long)Math.Ceiling(cell.Vehicles * scale),
-                        Events = (long)Math.Ceiling(cell.Events * scale),
-                        RequiredKw = Math.Round(cell.RequiredKw * scale, 0),
-                        RequiredMw = Math.Round(cell.RequiredKw * scale / 1000.0, 2),
+                        var scaledKw = cell.RequiredKw * scale;
+                        var anomaly = cell.AnomalyFlag || scaledKw > siteLimitKw * 1.001;
+                        var capped = Math.Min(scaledKw, siteLimitKw);
+                        return cell with
+                        {
+                            Vehicles = (long)Math.Ceiling(cell.Vehicles * scale),
+                            Events = (long)Math.Ceiling(cell.Events * scale),
+                            RequiredKw = Math.Round(capped, 0),
+                            RequiredMw = Math.Round(capped / 1000.0, 2),
+                            AnomalyFlag = anomaly,
+                        };
                     }).ToArray());
             })
             .ToArray();
@@ -576,7 +626,7 @@ public sealed partial class RouteAnalysisService
             VervoerderTypes = normalized.VervoerderTypes,
             Vervoerders = normalized.Vervoerders,
             Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
+            MinDwellMin = normalized.MinDwellMin <= 0 ? 15 : normalized.MinDwellMin,
             RoadThreshold = normalized.RoadThreshold,
             RoadTopPercent = normalized.RoadTopPercent,
             MarkerTopN = normalized.MarkerTopN,
@@ -591,6 +641,7 @@ public sealed partial class RouteAnalysisService
             ScenarioMode = NormalizeScenarioMode(request.ScenarioMode),
             CapacityKwh = Math.Clamp(request.CapacityKwh, 100, 1_500),
             MaxVehicleKw = Math.Clamp(request.MaxVehicleKw <= 0 ? 400 : request.MaxVehicleKw, 50, 1_500),
+            SiteLimitMw = Math.Clamp(request.SiteLimitMw <= 0 ? 1.4 : request.SiteLimitMw, 0.05, 50),
         };
     }
 
@@ -615,6 +666,7 @@ public sealed partial class RouteAnalysisService
             ScenarioMode = normalized.ScenarioMode,
             CapacityKwh = normalized.CapacityKwh,
             MaxVehicleKw = normalized.MaxVehicleKw,
+            SiteLimitMw = normalized.SiteLimitMw,
             LocationId = request.LocationId.Trim(),
         };
     }
@@ -723,61 +775,9 @@ public sealed partial class RouteAnalysisService
             .FirstOrDefault() ?? "";
     }
 
-    private static HashSet<string> LoadFleetVehicleKeys(string path)
-    {
-        try
-        {
-            using var stream = File.OpenRead(path);
-            using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
-            var sharedStrings = XlsxReader.ReadSharedStrings(archive);
-            var vehiclesPath = XlsxReader.ResolveWorksheetPath(archive, "Alle wagens");
-            if (vehiclesPath is null)
-            {
-                return new(StringComparer.OrdinalIgnoreCase);
-            }
-
-            var rows = XlsxReader.ReadWorksheetRows(archive, vehiclesPath, sharedStrings).ToArray();
-            if (rows.Length == 0)
-            {
-                return new(StringComparer.OrdinalIgnoreCase);
-            }
-
-            var headers = rows[0].Select(XlsxReader.NormalizeHeader).ToArray();
-            var vlootIdx = Array.FindIndex(headers, h => h.Contains("vloot", StringComparison.Ordinal));
-            var kentekenIdx = Array.FindIndex(headers, h => h.Contains("kenteken", StringComparison.Ordinal));
-            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in rows.Skip(1))
-            {
-                if (vlootIdx >= 0)
-                {
-                    var vloot = XlsxReader.Cell(row, vlootIdx).Trim();
-                    if (!string.IsNullOrWhiteSpace(vloot))
-                    {
-                        keys.Add(vloot);
-                    }
-                }
-
-                if (kentekenIdx >= 0)
-                {
-                    var plate = NormalizeLicensePlate(XlsxReader.Cell(row, kentekenIdx));
-                    if (!string.IsNullOrWhiteSpace(plate))
-                    {
-                        keys.Add(plate);
-                    }
-                }
-            }
-
-            return keys;
-        }
-        catch
-        {
-            return new(StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
     private static string ToHourlyCsv(PowerLocationProfile profile)
     {
-        var builder = new StringBuilder("location_id,name,address,hour,vehicles,events,required_kw,required_mw\n");
+        var builder = new StringBuilder("location_id,name,address,hour,vehicles,events,required_kw,required_mw,anomaly_flag\n");
         foreach (var cell in profile.HourlyProfile)
         {
             builder.AppendCsv(profile.LocationId)
@@ -787,7 +787,8 @@ public sealed partial class RouteAnalysisService
                 .AppendCsv(cell.Vehicles.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(cell.Events.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(cell.RequiredKw.ToString(CultureInfo.InvariantCulture))
-                .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture), endLine: true);
+                .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture))
+                .AppendCsv(cell.AnomalyFlag ? "1" : "0", endLine: true);
         }
 
         return builder.ToString();
@@ -795,7 +796,7 @@ public sealed partial class RouteAnalysisService
 
     private static string ToDailyCsv(IEnumerable<PowerDailyMetric> metrics)
     {
-        var builder = new StringBuilder("date,unique_vehicles,own_vehicles,charter_vehicles,trips,events,avg_dwell_min,peak_kw\n");
+        var builder = new StringBuilder("date,unique_vehicles,own_vehicles,charter_vehicles,trips,events,avg_dwell_min,peak_kw,anomaly_flag\n");
         foreach (var row in metrics)
         {
             builder.AppendCsv(row.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
@@ -805,7 +806,8 @@ public sealed partial class RouteAnalysisService
                 .AppendCsv(row.Trips.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(row.Events.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(row.AvgDwellMin.ToString(CultureInfo.InvariantCulture))
-                .AppendCsv(row.PeakKw.ToString(CultureInfo.InvariantCulture), endLine: true);
+                .AppendCsv(row.PeakKw.ToString(CultureInfo.InvariantCulture))
+                .AppendCsv(row.AnomalyFlag ? "1" : "0", endLine: true);
         }
 
         return builder.ToString();
@@ -813,7 +815,7 @@ public sealed partial class RouteAnalysisService
 
     private static string ToScenarioCsv(IEnumerable<PowerScenarioProfile> scenarios)
     {
-        var builder = new StringBuilder("year,mode,scale_factor,hour,vehicles,events,required_kw,required_mw\n");
+        var builder = new StringBuilder("year,mode,scale_factor,hour,vehicles,events,required_kw,required_mw,anomaly_flag\n");
         foreach (var scenario in scenarios)
         {
             foreach (var cell in scenario.HourlyProfile)
@@ -825,7 +827,8 @@ public sealed partial class RouteAnalysisService
                     .AppendCsv(cell.Vehicles.ToString(CultureInfo.InvariantCulture))
                     .AppendCsv(cell.Events.ToString(CultureInfo.InvariantCulture))
                     .AppendCsv(cell.RequiredKw.ToString(CultureInfo.InvariantCulture))
-                    .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture), endLine: true);
+                    .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture))
+                    .AppendCsv(cell.AnomalyFlag ? "1" : "0", endLine: true);
             }
         }
 
@@ -834,7 +837,7 @@ public sealed partial class RouteAnalysisService
 
     private static string ToHeatmapCsv(IEnumerable<PowerHeatmapCell> heatmap)
     {
-        var builder = new StringBuilder("location_id,location_name,hour,vehicles,required_kw,required_mw\n");
+        var builder = new StringBuilder("location_id,location_name,hour,vehicles,required_kw,required_mw,anomaly_flag\n");
         foreach (var cell in heatmap)
         {
             builder.AppendCsv(cell.LocationId)
@@ -842,7 +845,8 @@ public sealed partial class RouteAnalysisService
                 .AppendCsv(cell.Hour.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(cell.Vehicles.ToString(CultureInfo.InvariantCulture))
                 .AppendCsv(cell.RequiredKw.ToString(CultureInfo.InvariantCulture))
-                .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture), endLine: true);
+                .AppendCsv(cell.RequiredMw.ToString(CultureInfo.InvariantCulture))
+                .AppendCsv(cell.AnomalyFlag ? "1" : "0", endLine: true);
         }
 
         return builder.ToString();
@@ -926,6 +930,71 @@ public sealed partial class RouteAnalysisService
             }
         }
     }
+
+    private static async Task WriteMetaAsync(string companionFilePath, ExportMetadata meta, CancellationToken cancellationToken)
+    {
+        var sourceHashes = TryComputeInputHashes(meta);
+        var enriched = new
+        {
+            generated_at_utc = meta.GeneratedAtUtc.ToString("o", CultureInfo.InvariantCulture),
+            software_version = meta.SoftwareVersion,
+            companion_file = Path.GetFileName(companionFilePath),
+            companion_sha256 = SafeFileSha256(companionFilePath),
+            focus_location_id = meta.FocusLocationId,
+            focus_location_name = meta.FocusLocationName,
+            focus_address = meta.FocusAddress,
+            params_used = new
+            {
+                capacity_kwh = meta.CapacityKwh,
+                max_vehicle_kw = meta.MaxVehicleKw,
+                site_limit_mw = meta.SiteLimitMw,
+                scenario_years = meta.ScenarioYears,
+                vehicle_classes = meta.VehicleClasses,
+                fleet_rollout_mode = meta.FleetRolloutMode,
+            },
+            energy_assumptions = meta.EnergyAssumptions,
+            scenario_inflows = meta.ScenarioInflows,
+            input_source_hashes = sourceHashes,
+            note = "Sidecar metadata for reviewer audit. Anomaly_flag column flags hours where raw aggregate exceeded site_limit_mw (capped on export).",
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(enriched, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(companionFilePath + ".meta.json", json, cancellationToken);
+    }
+
+    private static string SafeFileSha256(string filePath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(filePath);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(stream);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> TryComputeInputHashes(ExportMetadata meta)
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed record ExportMetadata(
+        DateTime GeneratedAtUtc,
+        string SoftwareVersion,
+        string FocusLocationId,
+        string FocusLocationName,
+        string FocusAddress,
+        double CapacityKwh,
+        double MaxVehicleKw,
+        double SiteLimitMw,
+        int[] ScenarioYears,
+        string[] VehicleClasses,
+        Models.VehicleEnergyAssumption[] EnergyAssumptions,
+        string FleetRolloutMode,
+        ScenarioInflowAssumption[] ScenarioInflows);
 
     private static string EscapeHtml(string value)
     {

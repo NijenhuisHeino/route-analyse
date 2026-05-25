@@ -177,7 +177,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
 
         Assert.Equal("ok", locations.Status);
         var depot = Assert.Single(locations.Locations);
-        Assert.Equal("auto:52.000:5.000", depot.DepotId);
+        Assert.Equal("auto:52.0000:5.0000", depot.DepotId);
         Assert.Equal(1, depot.UniqueVehicles);
         Assert.Equal(180, depot.P95DayKm);
         Assert.True(depot.TotalMwh > 0);

@@ -542,7 +542,7 @@ public sealed class DuckDbRouteStore
                 COALESCE(NULLIF(adres, ''), 'unknown_location') AS adres,
                 CASE
                     WHEN lat IS NULL OR lon IS NULL THEN 'unknown_location:' || COALESCE(NULLIF(adres, ''), 'missing')
-                    ELSE printf('auto:%.3f:%.3f', ROUND(CAST(lat AS DOUBLE), 3), ROUND(CAST(lon AS DOUBLE), 3))
+                    ELSE printf('auto:%.4f:%.4f', ROUND(CAST(lat AS DOUBLE), 4), ROUND(CAST(lon AS DOUBLE), 4))
                 END AS location_id,
                 gepland_start,
                 gepland_eind,
@@ -999,7 +999,7 @@ public sealed class DuckDbRouteStore
             ),
             scored AS (
                 SELECT
-                    printf('auto:%.3f:%.3f', ROUND(start_lat, 3), ROUND(start_lon, 3)) AS depot_id,
+                    printf('auto:%.4f:%.4f', ROUND(start_lat, 4), ROUND(start_lon, 4)) AS depot_id,
                     *,
                     date_diff('second', prev_end_time, day_start) / 3600.0 AS gap_hours,
                     6371.0 * 2.0 * asin(sqrt(
@@ -1151,7 +1151,7 @@ public sealed class DuckDbRouteStore
                 COALESCE(CAST(adres AS VARCHAR), 'unknown_location') AS adres,
                 CASE
                     WHEN lat IS NULL OR lon IS NULL THEN 'unknown_location:' || COALESCE(CAST(adres AS VARCHAR), 'missing')
-                    ELSE printf('auto:%.3f:%.3f', ROUND(CAST(lat AS DOUBLE), 3), ROUND(CAST(lon AS DOUBLE), 3))
+                    ELSE printf('auto:%.4f:%.4f', ROUND(CAST(lat AS DOUBLE), 4), ROUND(CAST(lon AS DOUBLE), 4))
                 END AS location_id,
                 {{plannedStart}} AS gepland_start,
                 {{plannedEnd}} AS gepland_eind,
