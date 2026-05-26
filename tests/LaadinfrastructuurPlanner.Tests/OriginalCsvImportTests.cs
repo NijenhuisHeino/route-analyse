@@ -155,8 +155,9 @@ public sealed class OriginalCsvImportTests : IDisposable
         Assert.Equal("001", powerVehicle.Wagencode);
         Assert.Equal("11-BZX-8", powerVehicle.Kenteken);
         Assert.Equal("own", powerVehicle.VehicleClass);
-        // Hour 23 krijgt avgPower (181.5 kW) × 1h = 181.5 kWh aan demand.
-        Assert.InRange(powerVehicle.DemandKwh, 180, 185);
+        // Popup toont voertuig-niveau: total demand = avgPower × standing = 181.5 × 3.25 = ~590 kWh,
+        // power = avgPower = 181.5 kW.
+        Assert.InRange(powerVehicle.DemandKwh, 585, 595);
         Assert.InRange(powerVehicle.RequiredKw, 180, 185);
         Assert.Equal(new DateOnly(2026, 1, 1), hour23.Date);
         Assert.NotEmpty(detail.DailyMetrics);

@@ -543,7 +543,10 @@ public sealed partial class RouteAnalysisService
                 accumulator.RequiredKw += energyThisSlotKwh;
                 if (includeVehicleDemands)
                 {
-                    accumulator.AddVehicleDemand(powerEvent, energyThisSlotKwh, energyThisSlotKwh);
+                    // Popup toont voertuig-niveau (wat de truck echt trekt over zijn HELE stilstand),
+                    // niet de bijdrage aan dit specifieke uur-slot — dat is wat de gebruiker verwacht.
+                    var vehicleTotalDemandKwh = avgVehiclePowerKw * standingHours;
+                    accumulator.AddVehicleDemand(powerEvent, vehicleTotalDemandKwh, avgVehiclePowerKw);
                 }
 
                 cursor = next;
