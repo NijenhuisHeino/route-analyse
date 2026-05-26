@@ -947,22 +947,37 @@
     private async Task SelectPowerLocationAsync(string locationId)
     {
         var filter = BuildFilter();
-        SelectedPowerProfile = await Analysis.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+        try
         {
-            DateFrom = filter.DateFrom,
-            DateTo = filter.DateTo,
-            VervoerderTypes = filter.VervoerderTypes,
-            Vervoerders = filter.Vervoerders,
-            Wagencodes = filter.Wagencodes,
-            MinDwellMin = filter.MinDwellMin,
-            ZeZoneMode = filter.ZeZoneMode,
-            LocationId = locationId,
-            ScenarioYears = [2027, 2030],
-            ScenarioMode = "linear",
-            CapacityKwh = ScenarioCapacityKwh,
-            MaxVehicleKw = MaxVehicleKw,
-            VehicleClasses = PowerVehicleClasses()
-        });
+            SelectedPowerProfile = await Analysis.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+            {
+                DateFrom = filter.DateFrom,
+                DateTo = filter.DateTo,
+                VervoerderTypes = filter.VervoerderTypes,
+                Vervoerders = filter.Vervoerders,
+                Wagencodes = filter.Wagencodes,
+                MinDwellMin = filter.MinDwellMin,
+                ZeZoneMode = filter.ZeZoneMode,
+                LocationId = locationId,
+                ScenarioYears = [2027, 2030],
+                ScenarioMode = "linear",
+                CapacityKwh = ScenarioCapacityKwh,
+                MaxVehicleKw = MaxVehicleKw,
+                VehicleClasses = PowerVehicleClasses()
+            });
+        }
+        catch (Exception ex)
+        {
+            // Surface error to caller via popup; don't propagate to circuit handler.
+            SelectedPowerProfile = new PowerLocationProfileResponse(
+                "error",
+                $"{ex.GetType().Name}: {ex.Message}",
+                null,
+                [],
+                [],
+                false);
+            throw;
+        }
     }
 
     private async Task RunSimulationAsync()
@@ -1298,23 +1313,48 @@
 
     private async Task OpenPowerDemandPopupAsync(PowerLocationProfile profile, PowerHourlyCell cell)
     {
-        await SelectPowerLocationAsync(profile.LocationId);
-        var detailCell = SelectedPowerProfile?.Profile?.HourlyProfile.FirstOrDefault(x => x.Hour == cell.Hour) ?? cell;
-        var titleDate = detailCell.Date is null ? detailCell.Label : $"{detailCell.Date.Value:dd-MM-yyyy} {detailCell.Label}";
-        var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
+        // Open popup immediately with what we already know so user gets feedback,
+        // even if backend is slow or hangs.
+        var initialTitle = cell.Date is null ? cell.Label : $"{cell.Date.Value:dd-MM-yyyy} {cell.Label}";
         DemandPopup = new VehicleDemandPopup(
-            $"{profile.Name} · {titleDate}",
-            $"{detailCell.Vehicles:N0} voertuigen · {FormatPower(detailCell.RequiredKw)} gevraagd · {demandKwh:N0} kWh",
-            detailCell.VehicleDemands
-                .Select(vehicle => new VehicleDemandPopupRow(
-                    vehicle.Wagencode,
-                    vehicle.Kenteken,
-                    vehicle.VehicleClass,
-                    vehicle.DemandKwh,
-                    vehicle.RequiredKw,
-                    vehicle.StandingHours,
-                    vehicle.Window))
-                .ToArray());
+            $"{profile.Name} · {initialTitle}",
+            $"{cell.Vehicles:N0} voertuigen · {FormatPower(cell.RequiredKw)} gevraagd · laden…",
+            []);
+        IsBusy = true;
+        StateHasChanged();
+
+        try
+        {
+            await SelectPowerLocationAsync(profile.LocationId);
+            var detailCell = SelectedPowerProfile?.Profile?.HourlyProfile.FirstOrDefault(x => x.Hour == cell.Hour) ?? cell;
+            var titleDate = detailCell.Date is null ? detailCell.Label : $"{detailCell.Date.Value:dd-MM-yyyy} {detailCell.Label}";
+            var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
+            DemandPopup = new VehicleDemandPopup(
+                $"{profile.Name} · {titleDate}",
+                $"{detailCell.Vehicles:N0} voertuigen · {FormatPower(detailCell.RequiredKw)} gevraagd · {demandKwh:N0} kWh",
+                detailCell.VehicleDemands
+                    .Select(vehicle => new VehicleDemandPopupRow(
+                        vehicle.Wagencode,
+                        vehicle.Kenteken,
+                        vehicle.VehicleClass,
+                        vehicle.DemandKwh,
+                        vehicle.RequiredKw,
+                        vehicle.StandingHours,
+                        vehicle.Window))
+                    .ToArray());
+        }
+        catch (Exception ex)
+        {
+            DemandPopup = new VehicleDemandPopup(
+                $"{profile.Name} · {initialTitle}",
+                $"Kon detail niet laden: {ex.GetType().Name}: {ex.Message}",
+                []);
+        }
+        finally
+        {
+            IsBusy = false;
+            StateHasChanged();
+        }
     }
 
     private void CloseDemandPopup()
