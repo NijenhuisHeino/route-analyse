@@ -840,12 +840,21 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender) return;
+
+        MapCallbacks = DotNetObjectReference.Create(this);
+        try
         {
-            MapCallbacks = DotNetObjectReference.Create(this);
+            // Map scripts load in <body>; on first interactive render they may not be ready yet.
+            await JS.InvokeVoidAsync("__waitForPlannerMap", 10000);
             await JS.InvokeVoidAsync("routePlannerMap.init", "route-map", MapCallbacks);
             MapReady = true;
             await RefreshMapAsync();
+        }
+        catch (Exception ex)
+        {
+            // Don't kill the circuit if the map fails to initialize — rest of the dashboard must remain usable.
+            Console.Error.WriteLine($"[Home] map init failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
