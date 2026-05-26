@@ -28,7 +28,9 @@ internal static class TestParquetData
                 ('W1', 'Eigen vervoer', 'eigen', DATE '2026-01-02', 'T2', 1, 'Stop', 'Hub C', 'Adres C', TIMESTAMP '2026-01-02 11:00:00', TIMESTAMP '2026-01-02 11:00:00', 90.0, 180.0, 15.0, 52.200, 5.200),
                 ('W1', 'Eigen vervoer', 'eigen', DATE '2026-01-02', 'T2', 2, 'Destination', 'Depot A', 'Adres A 1234 AB', TIMESTAMP '2026-01-02 15:00:00', TIMESTAMP '2026-01-02 15:00:00', 90.0, 180.0, 15.0, 52.000, 5.000),
                 ('W2', 'Uitbesteed vervoer', 'charter', DATE '2026-01-02', 'T3', 0, 'Origin', 'Depot C', 'Adres C', TIMESTAMP '2026-01-02 07:00:00', TIMESTAMP '2026-01-02 07:00:00', 0.0, 200.0, 5.0, 53.000, 6.000),
-                ('W2', 'Uitbesteed vervoer', 'charter', DATE '2026-01-02', 'T3', 1, 'Destination', 'Hub D', 'Adres D', TIMESTAMP '2026-01-02 17:00:00', TIMESTAMP '2026-01-02 17:00:00', 200.0, 200.0, 15.0, 51.900, 4.500)
+                ('W2', 'Uitbesteed vervoer', 'charter', DATE '2026-01-02', 'T3', 1, 'Destination', 'Hub D', 'Adres D', TIMESTAMP '2026-01-02 17:00:00', TIMESTAMP '2026-01-02 17:00:00', 200.0, 200.0, 15.0, 51.900, 4.500),
+                ('W2', 'Uitbesteed vervoer', 'charter', DATE '2026-01-02', 'T4', 0, 'Origin', 'Hub D', 'Adres D', TIMESTAMP '2026-01-02 18:00:00', TIMESTAMP '2026-01-02 18:00:00', 0.0, 80.0, 5.0, 51.900, 4.500),
+                ('W2', 'Uitbesteed vervoer', 'charter', DATE '2026-01-02', 'T4', 1, 'Destination', 'Depot C', 'Adres C', TIMESTAMP '2026-01-02 21:00:00', TIMESTAMP '2026-01-02 21:00:00', 80.0, 80.0, 15.0, 53.000, 6.000)
             ) AS t(wagencode, vervoerder, vervoerder_type, trip_date, trip_id, stop_seq, acties, locatie_naam, adres, gepland_start, gepland_eind, afstand_km, afstand_km_trip, dwell_min, lat, lon);
             """);
         Execute(connection, $"COPY stops TO '{SqlPath(path)}' (FORMAT PARQUET);");

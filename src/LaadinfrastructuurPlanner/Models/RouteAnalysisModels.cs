@@ -408,6 +408,7 @@ public sealed record SelectionDetailResponse(
     double Lon,
     SelectionSummary Summary,
     DistanceDistribution Distribution,
+    DistanceDistribution DailyDistanceDistribution,
     HeatPoint[] HeatPoints,
     SelectionVehicleRow[] Vehicles,
     ChargingProfile Charging,

@@ -42,7 +42,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         var metadata = await _service.GetMetadataAsync();
 
         Assert.True(metadata.DataAvailable);
-        Assert.Equal(8, metadata.StopCount);
+        Assert.Equal(10, metadata.StopCount);
         Assert.Equal(new DateOnly(2026, 1, 1), metadata.MinDate);
         Assert.Equal(new DateOnly(2026, 1, 2), metadata.MaxDate);
         Assert.Contains("eigen", metadata.VervoerderTypes);
@@ -55,9 +55,9 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(300, eigen.TotalKm);
 
         var dateFiltered = await _service.GetSummaryAsync(new AnalysisFilter { DateFrom = new DateOnly(2026, 1, 2) });
-        Assert.Equal(5, dateFiltered.Stops);
-        Assert.Equal(2, dateFiltered.Trips);
-        Assert.Equal(380, dateFiltered.TotalKm);
+        Assert.Equal(7, dateFiltered.Stops);
+        Assert.Equal(3, dateFiltered.Trips);
+        Assert.Equal(460, dateFiltered.TotalKm);
     }
 
     [Fact]
@@ -71,8 +71,8 @@ public sealed class RouteAnalysisServiceTests : IDisposable
 
         var outsideZone = await _service.GetSummaryAsync(new AnalysisFilter { ZeZoneMode = "out" });
 
-        Assert.Equal(4, outsideZone.Stops);
-        Assert.Equal(3, outsideZone.Trips);
+        Assert.Equal(6, outsideZone.Stops);
+        Assert.Equal(4, outsideZone.Trips);
 
         var dashboard = await _service.GetDashboardAsync(new AnalysisFilter { ZeZoneMode = "in" });
         var zone = Assert.Single(dashboard.ZeZones);
@@ -181,6 +181,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(1, depot.UniqueVehicles);
         Assert.Equal(180, depot.P95DayKm);
         Assert.True(depot.TotalMwh > 0);
+        Assert.Equal(depot.TotalMwh, depot.ShortageMwh);
 
         var detail = await _service.GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest
         {
@@ -193,16 +194,19 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(180, detail.Distribution.P95Km);
         Assert.NotEmpty(detail.HeatPoints);
         Assert.NotEmpty(detail.Charging.BusyWindows);
+        Assert.Equal(detail.Charging.TotalMwh, detail.Charging.ShortageMwh);
+        Assert.All(detail.Charging.BusyWindows, window => Assert.Equal(window.DemandKwh, window.ShortageKwh));
+        Assert.Contains("Publieke laadvraag", detail.Charging.Recommendation, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(24, detail.Charging.HourlyProfile.Length);
         Assert.Equal(168, detail.Charging.WeeklyProfile.Length);
-        Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 15);
-        Assert.Contains(detail.Charging.WeeklyProfile, cell => cell.DayLabel == "Donderdag" && cell.Hour == 18 && cell.Vehicles == 1 && cell.RequiredKw == 15 && cell.Wagencodes.Contains("W1"));
+        Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 17);
+        Assert.Contains(detail.Charging.WeeklyProfile, cell => cell.DayLabel == "Donderdag" && cell.Hour == 18 && cell.Vehicles == 1 && cell.RequiredKw == 17 && cell.Wagencodes.Contains("W1"));
         var thursday18 = Assert.Single(detail.Charging.WeeklyProfile, cell => cell.DayLabel == "Donderdag" && cell.Hour == 18);
         var vehicleDemand = Assert.Single(thursday18.VehicleDemands);
         Assert.Equal("W1", vehicleDemand.Wagencode);
         Assert.Equal("-", vehicleDemand.Kenteken);
-        Assert.Equal(15, vehicleDemand.RequiredKw);
-        Assert.Equal(180, vehicleDemand.DemandKwh);
+        Assert.Equal(17, vehicleDemand.RequiredKw);
+        Assert.Equal(200, vehicleDemand.DemandKwh);
         Assert.Equal(12, vehicleDemand.StandingHours);
         Assert.Contains("18:00-06:00", vehicleDemand.Window);
         Assert.Contains(detail.Charging.WeeklyProfile, cell => cell.Vehicles == 0 && cell.RequiredKw == 0);
@@ -211,7 +215,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(180, vehicle.AvgDayKm);
         Assert.Equal(180, vehicle.AvgKwhPerDay);
         Assert.Equal(12, vehicle.AvgStandingHours);
-        Assert.Equal(15, vehicle.RequiredKw);
+        Assert.Equal(17, vehicle.RequiredKw);
     }
 
     [Fact]
@@ -233,7 +237,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(180, detail.Distribution.P95Km);
         Assert.NotEmpty(detail.HeatPoints);
         Assert.Contains(detail.HeatPoints, point => point.Lat == 52.2 && point.Lon == 5.2);
-        Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 15);
+        Assert.Contains(detail.Charging.HourlyProfile, hour => hour.Hour == 18 && hour.Vehicles == 1 && hour.RequiredKw == 17);
     }
 
     [Fact]
@@ -246,8 +250,17 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         });
 
         Assert.Equal("ok", selection.Status);
-        Assert.True(selection.Summary.Trips >= 1);
+        Assert.Equal(2, selection.Summary.Trips);
         Assert.True(selection.Distribution.P95Km >= 120);
+        Assert.Equal(1, selection.DailyDistanceDistribution.Trips);
+        Assert.Equal(280, selection.DailyDistanceDistribution.P95Km);
+        Assert.Equal(15, selection.DailyDistanceDistribution.Buckets.Length);
+        Assert.Equal(0, selection.DailyDistanceDistribution.Buckets[0].FromKm);
+        Assert.Equal(50, selection.DailyDistanceDistribution.Buckets[0].ToKm);
+        Assert.Equal(700, selection.DailyDistanceDistribution.Buckets[^1].FromKm);
+        Assert.Equal(750, selection.DailyDistanceDistribution.Buckets[^1].ToKm);
+        Assert.Single(selection.DailyDistanceDistribution.Buckets, x => x.Trips > 0);
+        Assert.Contains(selection.DailyDistanceDistribution.Buckets, x => x.FromKm == 250 && x.ToKm == 300 && x.Trips == 1);
         Assert.NotEmpty(selection.HeatPoints);
         Assert.Contains("corridor", selection.Charging.Recommendation, StringComparison.OrdinalIgnoreCase);
     }

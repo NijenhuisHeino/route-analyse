@@ -107,7 +107,7 @@ window.routePlannerMap = (() => {
           weight: location.uniqueVehicles || 1,
           events: location.events || 0,
           totalMwh: location.totalMwh || 0,
-          shortageMwh: location.shortageMwh || 0,
+          publicDemandMwh: location.shortageMwh || 0,
           recommendation: location.recommendation || ""
         },
         geometry: { type: "Point", coordinates: [location.lon, location.lat] }
@@ -139,6 +139,7 @@ window.routePlannerMap = (() => {
     ensureSource("selection-heat");
     ensureSource("stop-markers");
     ensureSource("road-lines");
+    ensureSource("road-selection");
     ensureSource("road-heat");
     ensureSource("overnight-locations");
     ensureSource("fleet-standplaatsen");
@@ -232,6 +233,7 @@ window.routePlannerMap = (() => {
         const feature = event.features?.[0];
         const coords = feature?.geometry?.coordinates;
         if (!coords || !dotNetRef) return;
+        clearRoadSelection();
         dotNetRef.invokeMethodAsync(
           "SelectStopLocationAsync",
           Number(coords[1]),
@@ -256,20 +258,46 @@ window.routePlannerMap = (() => {
       });
 
       map.on("click", "road-lines", (event) => {
-        const feature = event.features?.[0];
-        const coords = feature?.geometry?.coordinates;
-        if (!coords || coords.length < 2 || !dotNetRef) return;
-        dotNetRef.invokeMethodAsync(
-          "SelectRoadAsync",
-          Number(coords[0][1]),
-          Number(coords[0][0]),
-          Number(coords[coords.length - 1][1]),
-          Number(coords[coords.length - 1][0]),
-          Number(feature.properties?.radiusKm || 3)
-        );
+        selectRoadFeature(event.features?.[0]);
       });
       map.on("mouseenter", "road-lines", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "road-lines", () => { map.getCanvas().style.cursor = ""; });
+    }
+
+    if (!map.getLayer("road-selection")) {
+      map.addLayer({
+        id: "road-selection",
+        type: "line",
+        source: "road-selection",
+        paint: {
+          "line-color": "#f9bc13",
+          "line-width": ["interpolate", ["linear"], ["get", "weight"], 1, 4, 50, 9],
+          "line-opacity": 0.94
+        }
+      });
+    }
+
+    if (!map.getLayer("road-lines-hitbox")) {
+      map.addLayer({
+        id: "road-lines-hitbox",
+        type: "line",
+        source: "road-lines",
+        paint: {
+          "line-color": "#000000",
+          "line-width": 18,
+          "line-opacity": 0
+        }
+      });
+
+      map.on("click", "road-lines-hitbox", (event) => {
+        selectRoadFeature(event.features?.[0]);
+      });
+      map.on("mouseenter", "road-lines-hitbox", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "road-lines-hitbox", () => { map.getCanvas().style.cursor = ""; });
+    }
+
+    if (map.getLayer("road-selection") && map.getLayer("road-lines-hitbox")) {
+      map.moveLayer("road-selection", "road-lines-hitbox");
     }
 
     if (!map.getLayer("stop-markers")) {
@@ -294,7 +322,7 @@ window.routePlannerMap = (() => {
         source: "overnight-locations",
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["get", "weight"], 5, 7, 100, 18],
-          "circle-color": ["case", [">", ["get", "shortageMwh"], 0], "#dc2626", "#f9bc13"],
+          "circle-color": "#f9bc13",
           "circle-opacity": 0.9,
           "circle-stroke-width": 2,
           "circle-stroke-color": "#2e2343"
@@ -305,6 +333,7 @@ window.routePlannerMap = (() => {
         const feature = event.features?.[0];
         const depotId = feature?.properties?.depotId;
         if (!depotId || !dotNetRef) return;
+        clearRoadSelection();
         dotNetRef.invokeMethodAsync("SelectDepotAsync", depotId);
       });
       map.on("mouseenter", "overnight-locations", () => { map.getCanvas().style.cursor = "pointer"; });
@@ -396,6 +425,35 @@ window.routePlannerMap = (() => {
     if (map.getLayer("selection-heat") && map.getLayer("stop-markers")) {
       map.moveLayer("selection-heat", "stop-markers");
     }
+  }
+
+  function selectRoadFeature(feature) {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords || coords.length < 2 || !dotNetRef) return;
+    setData("road-selection", {
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        properties: feature.properties || {},
+        geometry: {
+          type: "LineString",
+          coordinates: coords
+        }
+      }]
+    });
+    dotNetRef.invokeMethodAsync(
+      "SelectRoadAsync",
+      Number(coords[0][1]),
+      Number(coords[0][0]),
+      Number(coords[coords.length - 1][1]),
+      Number(coords[coords.length - 1][0]),
+      Number(feature.properties?.radiusKm || 3)
+    );
+  }
+
+  function clearRoadSelection() {
+    if (!map || !isStyleReady()) return;
+    setData("road-selection", emptyFeatureCollection());
   }
 
   async function postJson(path, payload, signal) {
@@ -495,6 +553,8 @@ window.routePlannerMap = (() => {
         setVisibility("stop-heat", !!options.showStopHeat);
         setVisibility("stop-markers", !!options.showMarkers);
         setVisibility("road-lines", !!options.showRoads && roads.status === "ok");
+        setVisibility("road-selection", !!options.showRoads && roads.status === "ok");
+        setVisibility("road-lines-hitbox", !!options.showRoads && roads.status === "ok");
         setVisibility("road-heat", !!options.showRoadHeat && roads.status === "ok");
         setVisibility("chargers", !!options.showChargers && chargers.status === "ok");
         setVisibility("overnight-locations", !!options.showOvernight && overnight.status === "ok");
@@ -535,6 +595,16 @@ window.routePlannerMap = (() => {
       if (dotNetRef) {
         await dotNetRef.invokeMethodAsync("SelectRoadAsync", lat1, lon1, lat2, lon2, radiusKm);
       }
+    },
+
+    clearRoadSelection,
+
+    scrollToSelectionDetail: (elementId) => {
+      const scroll = () => {
+        const el = document.getElementById(elementId || "selection-detail");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+      window.requestAnimationFrame(() => window.setTimeout(scroll, 0));
     },
 
     updateSelectionHeat: (points) => {

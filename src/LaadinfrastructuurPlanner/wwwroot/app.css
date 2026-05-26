@@ -1117,6 +1117,56 @@ td span,
   text-align: right;
 }
 
+.distance-curve {
+  display: grid;
+  grid-template-columns: repeat(15, minmax(18px, 1fr));
+  align-items: end;
+  gap: 4px;
+  min-height: 190px;
+  padding: 14px 8px 6px;
+  border: 1px solid var(--eta-border);
+  border-radius: 7px;
+  background: linear-gradient(180deg, #fff 0%, #f7f8fb 100%);
+}
+
+.distance-bar {
+  display: grid;
+  grid-template-rows: 120px 18px 18px;
+  align-items: end;
+  min-width: 0;
+  text-align: center;
+  color: var(--eta-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.distance-bar i {
+  display: block;
+  justify-self: stretch;
+  align-self: end;
+  height: var(--bar-height, 2%);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: #d7dbe6;
+}
+
+.distance-bar.has-data i {
+  background: linear-gradient(180deg, var(--eta-yellow), var(--eta-blue));
+  box-shadow: 0 4px 10px rgba(15, 96, 120, 0.18);
+}
+
+.distance-bar span,
+.distance-bar b {
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.distance-bar b {
+  color: var(--eta-purple);
+  font-size: 11px;
+}
+
 .window-row {
   display: grid;
   grid-template-columns: 54px repeat(3, minmax(0, 1fr));

@@ -229,9 +229,14 @@ public sealed class DuckDbRouteStore
             return preferred;
         }
 
-        return Directory.Exists(_options.CacheDir)
-            ? Directory.GetFiles(_options.CacheDir, "route_stops_*.parquet").OrderBy(x => x).FirstOrDefault()
-            : null;
+        if (!Directory.Exists(_options.CacheDir))
+        {
+            return null;
+        }
+
+        return Directory.GetFiles(_options.CacheDir, "route_stops_*.parquet").OrderBy(x => x).FirstOrDefault()
+            ?? Directory.GetFiles(_options.CacheDir, "postnl_csv_Rittendata.parquet").OrderBy(x => x).FirstOrDefault()
+            ?? Directory.GetFiles(_options.CacheDir, "postnl_csv_*.parquet").OrderBy(x => x).FirstOrDefault();
     }
 
     private string[] ResolveSourceCsvFiles()
@@ -367,7 +372,7 @@ public sealed class DuckDbRouteStore
 
         var payload = new
         {
-            Version = "charging-demand-v8-power-profiles",
+            Version = "charging-demand-v9-road-selection-index",
             Sources = sourcePaths.Select(path =>
             {
                 var info = new FileInfo(path);

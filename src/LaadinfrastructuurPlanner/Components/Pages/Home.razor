@@ -95,7 +95,7 @@
                 </div>
                 @if (OpenLayerInfoId == "wegvlakken")
                 {
-                    <p id="layer-info-wegvlakken" class="layer-info-panel">Klikbare lijnsegmenten uit de wegpassage-cache. Ze laten zien waar routes over het wegennet lopen en gebruiken de minimum-passages en zichtbare-wegdata filters.</p>
+                    <p id="layer-info-wegvlakken" class="layer-info-panel">Klikbare paarse toplijnen met segment-identiteit. Ze zijn samengesteld uit wegpassages, begrensd door de zichtbare-wegdata filter, en openen een detailanalyse per aangeklikt wegvlak.</p>
                 }
             </div>
             <div class="layer-toggle-item">
@@ -105,7 +105,7 @@
                 </div>
                 @if (OpenLayerInfoId == "wegdrukte")
                 {
-                    <p id="layer-info-wegdrukte" class="layer-info-panel">Vloeiende heatmap van dezelfde wegpassages als Wegvlakken. Deze laag is bedoeld voor patroonherkenning op corridors, niet voor detailselectie of klikken op losse segmenten.</p>
+                    <p id="layer-info-wegdrukte" class="layer-info-panel">Niet-klikbare heatmap van losse wegdruktepunten. Deze laag gebruikt dezelfde passagedrempel, maar toont veel meer concentratiepunten dan de begrensde klikbare wegvlakken.</p>
                 }
             </div>
             <div class="layer-toggle-item">
@@ -115,7 +115,7 @@
                 </div>
                 @if (OpenLayerInfoId == "vaste-stilstandlocaties")
                 {
-                    <p id="layer-info-vaste-stilstandlocaties" class="layer-info-panel">Afgeleid uit lange stilstand- en overnacht-events in ritdata. Geel of rood geeft verwachte lokale laadvraag of laadtekort op basis van de huidige voertuigscenario-instellingen.</p>
+                    <p id="layer-info-vaste-stilstandlocaties" class="layer-info-panel">Afgeleid uit lange stilstand- en overnacht-events in ritdata. Het vermogensprofiel toont de gevraagde publieke laadvraag op basis van de huidige voertuigscenario-instellingen.</p>
                 }
             </div>
             <div class="layer-toggle-item">
@@ -493,12 +493,11 @@
 
                     @if (!LegendCollapsed && ShowOvernight)
                     {
-                        <div class="legend-item split">
+                        <div class="legend-item">
                             <span class="legend-symbol overnight-ok"></span>
-                            <span class="legend-symbol overnight-shortage"></span>
                             <div>
                                 <strong>Vaste stilstandlocaties</strong>
-                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
+                                <span>Stilstandlocaties uit ritdata; klik voor publieke laadvraag per weekuur.</span>
                             </div>
                         </div>
                     }
@@ -520,7 +519,7 @@
                             <span class="legend-line road-line"></span>
                             <div>
                                 <strong>Wegvlakken</strong>
-                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
+                                <span>Klikbare paarse toplijnen met segment-identiteit. Aantal is begrensd door zichtbare wegdata.</span>
                             </div>
                         </div>
                     }
@@ -531,7 +530,7 @@
                             <span class="legend-gradient road-gradient"></span>
                             <div>
                                 <strong>Wegdrukte</strong>
-                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
+                                <span>Niet klikbare heatmap met losse concentratiepunten; daarom vaak meer resultaten dan wegvlakken.</span>
                             </div>
                         </div>
                     }
@@ -552,7 +551,7 @@
 
         @if (SelectedDetail is not null)
         {
-            <section class="selection-panel">
+            <section id="selection-detail" class="selection-panel">
                 <div class="panel-heading">
                     <div>
                         <h3>@SelectedDetail.Title</h3>
@@ -619,22 +618,50 @@
                     </div>
                 }
 
+                @{
+                    var distanceDistribution = SelectedDistanceDistribution();
+                    var distanceTitle = SelectedDetail.SelectionType == "road"
+                        ? "Dagkilometers van voertuigen over dit wegvlak"
+                        : "Afstandsverdeling";
+                    var distanceSubtitle = SelectedDetail.SelectionType == "road"
+                        ? $"{distanceDistribution.Trips:N0} voertuig-dagen · P50 {distanceDistribution.P50Km:N0} km · P75 {distanceDistribution.P75Km:N0} km · P95 {distanceDistribution.P95Km:N0} km"
+                        : $"P95 {distanceDistribution.P95Km:N0} km";
+                }
+
                 <div class="selection-grid">
                     <div class="analysis-card">
                         <div class="card-heading">
-                            <strong>Afstandsverdeling</strong>
-                            <span>P95 @SelectedDetail.Distribution.P95Km.ToString("N0") km</span>
+                            <strong>@distanceTitle</strong>
+                            <span>@distanceSubtitle</span>
                         </div>
-                        <div class="histogram">
-                            @foreach (var bucket in SelectedDetail.Distribution.Buckets)
-                            {
-                                <div class="histogram-row">
-                                    <span>@bucket.FromKm.ToString("N0")-@bucket.ToKm.ToString("N0")</span>
-                                    <div><i style="width:@HistogramWidth(bucket.Trips, SelectedDetail.Distribution.Buckets)"></i></div>
-                                    <b>@bucket.Trips</b>
-                                </div>
-                            }
-                        </div>
+                        @if (SelectedDetail.SelectionType == "road")
+                        {
+                            <div class="distance-curve" aria-label="Dagkilometers per voertuig-dag">
+                                @foreach (var bucket in distanceDistribution.Buckets)
+                                {
+                                    <div class="@DistanceBucketClass(bucket)"
+                                         style="@DistanceBarStyle(bucket.Trips, distanceDistribution.Buckets)"
+                                         title="@($"{DistanceBucketLabel(bucket)} km: {bucket.Trips:N0} voertuig-dagen")">
+                                        <i></i>
+                                        <span>@DistanceBucketShortLabel(bucket)</span>
+                                        <b>@bucket.Trips</b>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="histogram">
+                                @foreach (var bucket in distanceDistribution.Buckets)
+                                {
+                                    <div class="histogram-row">
+                                        <span>@bucket.FromKm.ToString("N0")-@bucket.ToKm.ToString("N0")</span>
+                                        <div><i style="width:@HistogramWidth(bucket.Trips, distanceDistribution.Buckets)"></i></div>
+                                        <b>@bucket.Trips</b>
+                                    </div>
+                                }
+                            </div>
+                        }
                     </div>
 
                     <div class="analysis-card">
@@ -648,7 +675,7 @@
                                 <div class="window-row">
                                     <strong>@window.TimeSlot</strong>
                                     <span>@window.DemandKwh.ToString("N0") kWh nodig</span>
-                                    <span>@window.ShortageKwh.ToString("N0") kWh tekort</span>
+                                    <span>@window.ShortageKwh.ToString("N0") kWh publieke laadvraag</span>
                                     <span>@window.RequiredMw.ToString("N2") MW</span>
                                 </div>
                             }
@@ -842,6 +869,7 @@
     private bool IsUploading { get; set; }
     private bool MapReady { get; set; }
     private bool LegendCollapsed { get; set; }
+    private bool PendingSelectionScroll { get; set; }
     private string? SelectedDepotId { get; set; }
     private RoadSelection? SelectedRoad { get; set; }
     private StopLocationDetailRequest? SelectedStopLocation { get; set; }
@@ -921,6 +949,12 @@
             MapReady = true;
             await RefreshMapAsync();
         }
+
+        if (PendingSelectionScroll && MapReady)
+        {
+            PendingSelectionScroll = false;
+            await JS.InvokeVoidAsync("routePlannerMap.scrollToSelectionDetail", "selection-detail");
+        }
     }
 
     private async Task ApplyFiltersAsync()
@@ -939,10 +973,12 @@
         SelectedDepotId = null;
         SelectedRoad = null;
         SelectedStopLocation = null;
+        PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
         await ClearSelectionHeatAsync();
+        await ClearRoadSelectionAsync();
 
         try
         {
@@ -1171,9 +1207,11 @@
         SelectedDepotId = depotId;
         SelectedRoad = null;
         SelectedStopLocation = null;
+        PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        await ClearRoadSelectionAsync();
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -1190,9 +1228,11 @@
         };
         SelectedDepotId = null;
         SelectedRoad = null;
+        PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        await ClearRoadSelectionAsync();
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -1203,6 +1243,7 @@
         SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, radiusKm);
         SelectedDepotId = null;
         SelectedStopLocation = null;
+        PendingSelectionScroll = true;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
@@ -1215,6 +1256,7 @@
         if (SelectedDepotId is null && SelectedRoad is null && SelectedStopLocation is null)
         {
             await ClearSelectionHeatAsync();
+            await ClearRoadSelectionAsync();
             return;
         }
 
@@ -1343,6 +1385,14 @@
         if (MapReady)
         {
             await JS.InvokeVoidAsync("routePlannerMap.clearSelectionHeat");
+        }
+    }
+
+    private async Task ClearRoadSelectionAsync()
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.clearRoadSelection");
         }
     }
 
@@ -1520,6 +1570,42 @@
         var max = buckets.Count == 0 ? 0 : buckets.Max(x => x.Trips);
         var width = max <= 0 ? 0 : Math.Max(4, Math.Round(100.0 * trips / max, 1));
         return width.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+    }
+
+    private DistanceDistribution SelectedDistanceDistribution()
+    {
+        if (SelectedDetail is null)
+        {
+            return new DistanceDistribution(0, 0, 0, 0, 0, 0, 0, []);
+        }
+
+        return SelectedDetail.SelectionType == "road"
+            ? SelectedDetail.DailyDistanceDistribution
+            : SelectedDetail.Distribution;
+    }
+
+    private static string DistanceBarStyle(long trips, IReadOnlyCollection<DistanceBucket> buckets)
+    {
+        var max = buckets.Count == 0 ? 0 : buckets.Max(x => x.Trips);
+        var height = max <= 0 || trips <= 0 ? 2 : Math.Max(6, Math.Round(100.0 * trips / max, 1));
+        return $"--bar-height:{height.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%";
+    }
+
+    private static string DistanceBucketClass(DistanceBucket bucket)
+    {
+        return bucket.Trips > 0 ? "distance-bar has-data" : "distance-bar";
+    }
+
+    private static string DistanceBucketLabel(DistanceBucket bucket)
+    {
+        return $"{bucket.FromKm:N0}-{bucket.ToKm:N0}";
+    }
+
+    private static string DistanceBucketShortLabel(DistanceBucket bucket)
+    {
+        return bucket.FromKm % 100 == 0 || bucket.FromKm == 700
+            ? bucket.FromKm.ToString("N0")
+            : "";
     }
 
     private static string FormatNumber(double? value) => value is null ? "-" : value.Value.ToString("N0");

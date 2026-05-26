@@ -21,9 +21,9 @@ public sealed class LayerInfoUiTests
 
         AssertLayerInfo(home, "stopdrukte", "Stopdrukte", "operationele stops, niet automatisch standplaatsen");
         AssertLayerInfo(home, "toplocaties", "Toplocaties", "gegroepeerd op afgeronde coordinaten");
-        AssertLayerInfo(home, "wegvlakken", "Wegvlakken", "minimum-passages en zichtbare-wegdata filters");
-        AssertLayerInfo(home, "wegdrukte", "Wegdrukte", "niet voor detailselectie");
-        AssertLayerInfo(home, "vaste-stilstandlocaties", "Vaste stilstandlocaties", "Geel of rood geeft verwachte lokale laadvraag");
+        AssertLayerInfo(home, "wegvlakken", "Wegvlakken", "openen een detailanalyse per aangeklikt wegvlak");
+        AssertLayerInfo(home, "wegdrukte", "Wegdrukte", "veel meer concentratiepunten");
+        AssertLayerInfo(home, "vaste-stilstandlocaties", "Vaste stilstandlocaties", "gevraagde publieke laadvraag");
         AssertLayerInfo(home, "standplaatsen", "Standplaatsen (PostNL-wagenpark)", "thuisbases zijn");
         AssertLayerInfo(home, "laadlocaties", "Laadlocaties", "vermogen, stekkers, toegang");
     }

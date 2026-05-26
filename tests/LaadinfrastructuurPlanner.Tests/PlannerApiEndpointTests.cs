@@ -45,7 +45,7 @@ public sealed class PlannerApiEndpointTests : IDisposable
         var metadata = await client.GetFromJsonAsync<MetadataResponse>("/api/metadata");
         Assert.NotNull(metadata);
         Assert.True(metadata.DataAvailable);
-        Assert.Equal(8, metadata.StopCount);
+        Assert.Equal(10, metadata.StopCount);
         Assert.Contains("Test ZE-zone", metadata.ZeZones);
 
         var summary = await PostAsync<SummaryResponse>(client, "/api/summary", new AnalysisFilter { VervoerderTypes = ["eigen"] });
@@ -84,6 +84,8 @@ public sealed class PlannerApiEndpointTests : IDisposable
         });
         Assert.Equal("ok", roadDetail.Status);
         Assert.NotEmpty(roadDetail.Vehicles);
+        Assert.Equal(1, roadDetail.DailyDistanceDistribution.Trips);
+        Assert.Equal(15, roadDetail.DailyDistanceDistribution.Buckets.Length);
 
         var stopDetail = await PostAsync<SelectionDetailResponse>(client, "/api/stops/location", new StopLocationDetailRequest
         {
