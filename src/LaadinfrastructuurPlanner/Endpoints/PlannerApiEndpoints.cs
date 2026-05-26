@@ -73,6 +73,8 @@ public static class PlannerApiEndpoints
         api.MapPost("/corridors/hotspots", ([FromBody] AnalysisFilter filter, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetCorridorHotspotsAsync(filter, null, 25, cancellationToken));
 
+        api.MapGet("/debug/recent-errors", (RecentExceptionBuffer buffer) => buffer.Snapshot());
+
         return endpoints;
     }
 }

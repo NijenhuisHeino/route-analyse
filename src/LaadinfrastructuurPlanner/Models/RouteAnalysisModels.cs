@@ -297,6 +297,9 @@ public record PowerProfileRequest : AnalysisFilter
     public double CapacityKwh { get; init; } = 590;
     public double MaxVehicleKw { get; init; } = 400;
     public double SiteLimitMw { get; init; } = 1.4;
+    public double KwhPerKm { get; init; } = 1.2;
+    public double MinSocPct { get; init; } = 15;
+    public double TargetSocPct { get; init; } = 80;
 }
 
 public sealed record PowerLocationProfileRequest : PowerProfileRequest

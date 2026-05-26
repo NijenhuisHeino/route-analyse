@@ -7,11 +7,23 @@ using System.Net;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents(options =>
+    {
+        // Surface real exception messages to the browser so the Blazor error UI is actionable.
+        // Set ROUTE_ANALYSIS_DETAILED_ERRORS=false in production to revert to generic messages.
+        var disableFromEnv = string.Equals(
+            Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_DETAILED_ERRORS"),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+        options.DetailedErrors = !disableFromEnv;
+    });
 builder.Services.Configure<HubOptions>(options =>
 {
     options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
 });
+builder.Services.AddSingleton<RecentExceptionBuffer>();
+builder.Services.AddSingleton<ILoggerProvider>(sp =>
+    new RecentExceptionLoggerProvider(sp.GetRequiredService<RecentExceptionBuffer>()));
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(_ => RouteAnalysisOptionsFactory.FromContentRoot(builder.Environment.ContentRootPath, builder.Configuration));
 builder.Services.AddSingleton<DuckDbRouteStore>();

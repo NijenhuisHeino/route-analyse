@@ -126,15 +126,17 @@ public sealed class OriginalCsvImportTests : IDisposable
         Assert.Equal("ok", profiles.Status);
         var nieuwegein = Assert.Single(profiles.Locations);
         Assert.Contains("Groteweerd", nieuwegein.Address, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(182, nieuwegein.PeakKw);
+        // SoC-aware front-loaded model: 12 km × 1.2 kWh/km = 14.4 kWh needed.
+        // Charged in first hour-slot at MaxVehicleKw (400). Subsequent hours = 0 (battery full).
+        Assert.Equal(14, nieuwegein.PeakKw);
         Assert.Equal(1, nieuwegein.UniqueOwnVehicles);
         Assert.Equal(0, nieuwegein.UniqueCharterVehicles);
         Assert.Equal(24, nieuwegein.HourlyProfile.Length);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 22 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 23 && h.RequiredKw == 182);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 22 && h.RequiredKw == 14 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 0);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 0);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 0);
+        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 22 && h.RequiredKw == 14);
 
         var detail = await service.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
         {
@@ -147,15 +149,17 @@ public sealed class OriginalCsvImportTests : IDisposable
 
         Assert.Equal("ok", detail.Status);
         Assert.Equal(nieuwegein.LocationId, detail.Profile?.LocationId);
-        var hour23 = Assert.Single(detail.Profile!.HourlyProfile, h => h.Hour == 23);
-        var powerVehicle = Assert.Single(hour23.VehicleDemands);
+        // With SoC-aware front-loaded model the charging happens in hour 22 (event start),
+        // hour 23 is post-charge so power is zero and no vehicles credited.
+        var hour22 = Assert.Single(detail.Profile!.HourlyProfile, h => h.Hour == 22);
+        var powerVehicle = Assert.Single(hour22.VehicleDemands);
         Assert.Equal("001", powerVehicle.Wagencode);
         Assert.Equal("11-BZX-8", powerVehicle.Kenteken);
         Assert.Equal("own", powerVehicle.VehicleClass);
-        Assert.Equal(590, powerVehicle.DemandKwh);
-        Assert.Equal(182, powerVehicle.RequiredKw);
-        Assert.Equal(3.25, powerVehicle.StandingHours);
-        Assert.Equal(new DateOnly(2026, 1, 1), hour23.Date);
+        // 12 km × 1.2 kWh/km = 14.4 kWh, capped by usable 590×0.65=383.5 → 14.4
+        Assert.InRange(powerVehicle.DemandKwh, 14, 15);
+        Assert.InRange(powerVehicle.RequiredKw, 14, 15);
+        Assert.Equal(new DateOnly(2026, 1, 1), hour22.Date);
         Assert.NotEmpty(detail.DailyMetrics);
         Assert.Contains(detail.Scenarios, s => s.Year == 2027 && s.HourlyProfile.Length == 24);
         Assert.Contains(detail.Scenarios, s => s.Year == 2030 && s.Mode == "linear");
@@ -171,7 +175,9 @@ public sealed class OriginalCsvImportTests : IDisposable
         });
         var cappedDepot = Assert.Single(cappedCharter.Locations);
         Assert.Equal("Depot B", cappedDepot.Address);
-        Assert.Equal(400, cappedDepot.PeakKw);
+        // Charter pause 12:00-12:45 (45 min), 12 km × 1.2 = 14.4 kWh demand,
+        // front-loaded at 400 kW → 14 kW avg for hour-slot 12.
+        Assert.InRange(cappedDepot.PeakKw, 14, 15);
 
         var mcsCharter = await service.GetPowerProfilesAsync(new PowerProfileRequest
         {
@@ -183,7 +189,9 @@ public sealed class OriginalCsvImportTests : IDisposable
             MaxVehicleKw = 1500,
         });
         var mcsDepot = Assert.Single(mcsCharter.Locations);
-        Assert.Equal(787, mcsDepot.PeakKw);
+        // Same 14.4 kWh demand. With MCS 1500 kW the time-to-full shrinks but the per-hour
+        // energy delivered into the single slot is the same.
+        Assert.InRange(mcsDepot.PeakKw, 14, 15);
 
         var diagnostics = await service.GetPowerDiagnosticsAsync(new AnalysisFilter());
         Assert.True(diagnostics.RoutesWithoutWaitWindow > 0);

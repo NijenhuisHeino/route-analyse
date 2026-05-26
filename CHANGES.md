@@ -43,4 +43,10 @@
 - **Geocoding override**: optioneel `data/fleet_geocoded.csv` of `ROUTE_ANALYSIS_GEOCODING_OVERRIDE` env var; overschrijft Nominatim resultaten met handmatig geverifieerde coordinaten. Template: `scripts/fleet_geocoded_template.csv`.
 - **Corridor hotspots**: nieuwe endpoint `POST /api/corridors/hotspots` alloceert corridor-shortage MWh aan top-N drukste wegsegmenten via grid-bucketed (`mid_lat,mid_lon` op 0.01° ≈ 1.1 km) Voronoi-achtige clustering.
 - **Backtest gap**: tool's `1.2 kWh/km` is **niet** gevalideerd tegen reëel meterverbruik. Template `scripts/backtest_template.csv` toegevoegd voor PostNL pilot-data; MAPE-berekening volgt zodra meterdata beschikbaar is.
+
+## 7. SoC-bewuste vermogensberekening + foutbanner observability (2026-05-26)
+- **Front-loaded laadcurve**: vervangen van naive `capacity / standingHours` formule door fysisch realistisch model. Per voertuig: `demand_kwh = min(distance × kWh/km, capacity × (target-min)/100)`; vermogen = `MaxVehicleKw` zolang energie nog niet vol is, daarna 0. Voor 12 km rit met 400 kW lader: 14 kW in eerste uur, 0 kW daarna — i.p.v. 182 kW gespreid over 4 uur. Tests (`OriginalCsvWaitAndPauseActionsProduceHourlyPowerProfiles`) bijgewerkt naar realistische waardes.
+- **PowerProfileRequest**: nieuwe parameters `KwhPerKm` (default 1.2), `MinSocPct` (15), `TargetSocPct` (80) met clamping in `NormalizePowerRequest`. Zichtbaar in API responses en aanstuurbaar via UI-input (vervolgwerk: UI-knoppen toevoegen).
+- **Property test**: `ChargingEnergyPerVehicleNeverExceedsUsableSoc` en `FrontLoadedAllocationProducesZeroPowerAfterChargeCompletes` toegevoegd.
+- **Foutbanner observability**: `CircuitOptions.DetailedErrors = true` standaard aan (toggle via `ROUTE_ANALYSIS_DETAILED_ERRORS=false`). Nieuwe in-memory `RecentExceptionBuffer` met laatste 50 warnings/errors via ILoggerProvider. Endpoint `GET /api/debug/recent-errors` toont JSON met stack traces. MainLayout error-banner heeft nu "Details"-link die naar dat endpoint linkt.
 - De 2026 instroom is omgerekend naar 3 trekker-equivalenten omdat 6 trekkers pas in september instromen.
