@@ -1,0 +1,17 @@
+[theme]
+primaryColor = "#f9bc13"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f6"
+textColor = "#1a1a1f"
+font = "sans serif"
+
+[server]
+headless = true
+enableXsrfProtection = false
+enableCORS = false
+maxMessageSize = 500
+
+[browser]
+serverAddress = "route-analyse.nijenhuistrucksolutions.nl"
+serverPort = 443
+gatherUsageStats = false
