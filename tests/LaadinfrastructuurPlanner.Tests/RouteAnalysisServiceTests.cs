@@ -261,6 +261,9 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal(750, selection.DailyDistanceDistribution.Buckets[^1].ToKm);
         Assert.Single(selection.DailyDistanceDistribution.Buckets, x => x.Trips > 0);
         Assert.Contains(selection.DailyDistanceDistribution.Buckets, x => x.FromKm == 250 && x.ToKm == 300 && x.Trips == 1);
+        var vehicle = Assert.Single(selection.Vehicles);
+        Assert.Equal("W2", vehicle.Wagencode);
+        Assert.Equal(2, vehicle.Passages);
         Assert.NotEmpty(selection.HeatPoints);
         Assert.Contains("corridor", selection.Charging.Recommendation, StringComparison.OrdinalIgnoreCase);
     }

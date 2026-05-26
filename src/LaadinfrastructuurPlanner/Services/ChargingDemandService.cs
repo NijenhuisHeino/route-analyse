@@ -461,6 +461,7 @@ public sealed partial class RouteAnalysisService
                     wagencodes,
                     kentekens,
                     group.LongCount(),
+                    group.LongCount(),
                     Math.Round(group.Sum(x => x.DistanceKm), 1),
                     Math.Round(group.Average(x => x.DistanceKm), 1),
                     Math.Round(QuantileSorted(distances, 0.95), 1),

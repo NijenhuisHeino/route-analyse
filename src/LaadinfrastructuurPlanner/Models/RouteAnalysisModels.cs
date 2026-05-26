@@ -230,6 +230,7 @@ public sealed record SelectionVehicleRow(
     string Wagencode,
     string Kentekens,
     long Days,
+    long Passages,
     double TotalKm,
     double AvgDayKm,
     double P95Km,

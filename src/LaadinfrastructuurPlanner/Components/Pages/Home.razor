@@ -636,6 +636,7 @@
                         </div>
                         @if (SelectedDetail.SelectionType == "road")
                         {
+                            <p class="distance-note">Staafhoogte = aantal voertuig-dagen. De rij met 0, 100, 200 enz. is de km/dag-bucket; de vetgedrukte rij eronder is het aantal voertuig-dagen in die bucket.</p>
                             <div class="distance-curve" aria-label="Dagkilometers per voertuig-dag">
                                 @foreach (var bucket in distanceDistribution.Buckets)
                                 {
@@ -647,6 +648,35 @@
                                         <b>@bucket.Trips</b>
                                     </div>
                                 }
+                            </div>
+                            <div class="distance-axis-key" aria-hidden="true">
+                                <span>Km/dag bucket</span>
+                                <strong>Aantal voertuig-dagen</strong>
+                            </div>
+                            <div class="road-passage-table">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Kenteken(s)</th>
+                                            <th>Voertuigcode</th>
+                                            <th>Passages</th>
+                                            <th>Gem. km/dag</th>
+                                            <th>P95 km</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in RoadPassageRows())
+                                        {
+                                            <tr>
+                                                <td><strong>@row.Kentekens</strong></td>
+                                                <td>@row.Wagencode</td>
+                                                <td>@row.Passages.ToString("N0")</td>
+                                                <td>@row.AvgDayKm.ToString("N0")</td>
+                                                <td>@row.P95Km.ToString("N0")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
                             </div>
                         }
                         else
@@ -694,7 +724,7 @@
                                 <tr>
                                     <th>Kenteken(s)</th>
                                     <th>Voertuigcode</th>
-                                    <th>Dagen</th>
+                                    <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
                                     <th>Km/dag</th>
                                     <th>kWh/dag</th>
                                     <th>Uren op locatie</th>
@@ -707,7 +737,7 @@
                                     <tr>
                                         <td><strong>@row.Kentekens</strong></td>
                                         <td>@row.Wagencode</td>
-                                        <td>@row.Days</td>
+                                        <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
                                         <td>@row.AvgDayKm.ToString("N0")</td>
                                         <td>@row.AvgKwhPerDay.ToString("N0")</td>
                                         <td>@row.AvgStandingHours.ToString("N1")</td>
@@ -1590,6 +1620,14 @@
         return SelectedDetail.SelectionType == "road"
             ? SelectedDetail.DailyDistanceDistribution
             : SelectedDetail.Distribution;
+    }
+
+    private IEnumerable<SelectionVehicleRow> RoadPassageRows()
+    {
+        return SelectedDetail?.Vehicles
+            .OrderByDescending(x => x.Passages)
+            .ThenBy(x => x.Kentekens, StringComparer.OrdinalIgnoreCase)
+            .Take(20) ?? [];
     }
 
     private static string DistanceBarStyle(long trips, IReadOnlyCollection<DistanceBucket> buckets)

@@ -1156,6 +1156,14 @@ td span,
   background: linear-gradient(180deg, #fff 0%, #f7f8fb 100%);
 }
 
+.distance-note {
+  margin: -2px 0 10px;
+  color: var(--eta-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .distance-bar {
   display: grid;
   grid-template-rows: 120px 18px 18px;
@@ -1192,6 +1200,37 @@ td span,
 .distance-bar b {
   color: var(--eta-purple);
   font-size: 11px;
+}
+
+.distance-axis-key {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  margin: 6px 0 12px;
+  color: var(--eta-muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.distance-axis-key strong {
+  color: var(--eta-purple);
+}
+
+.road-passage-table {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--eta-border);
+  border-radius: 7px;
+}
+
+.road-passage-table table {
+  font-size: 12px;
+}
+
+.road-passage-table th,
+.road-passage-table td {
+  padding: 8px 10px;
 }
 
 .window-row {
