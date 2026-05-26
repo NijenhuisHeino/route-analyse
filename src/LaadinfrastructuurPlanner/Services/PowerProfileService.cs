@@ -495,22 +495,17 @@ public sealed partial class RouteAnalysisService
         var capacityKwh = request.CapacityKwh;
         var maxVehicleKw = request.MaxVehicleKw;
         var siteLimitMw = request.SiteLimitMw;
-        var kwhPerKm = request.KwhPerKm > 0 ? request.KwhPerKm : 1.2;
-        var minSoc = Math.Clamp(request.MinSocPct, 0, 50);
-        var targetSoc = Math.Clamp(Math.Max(request.TargetSocPct, minSoc + 1), 20, 100);
-        var usablePerVehicleKwh = capacityKwh * Math.Max(0, targetSoc - minSoc) / 100.0;
         var siteLimitKw = siteLimitMw > 0 ? siteLimitMw * 1000.0 : double.PositiveInfinity;
         var slots = new Dictionary<DateTime, PowerAccumulator>();
         foreach (var powerEvent in events)
         {
             if (powerEvent.EndTime <= powerEvent.StartTime || maxVehicleKw <= 0) continue;
 
-            // Energy this vehicle actually needs at this stop: distance reverse-engineered,
-            // capped at usable SoC window. If no distance recorded, fall back to usable.
-            var distanceDemandKwh = Math.Max(0, powerEvent.DistanceKm * kwhPerKm);
-            var demandKwh = distanceDemandKwh > 0
-                ? Math.Min(distanceDemandKwh, usablePerVehicleKwh)
-                : usablePerVehicleKwh;
+            // Conservatieve aanname: elke truck wil tot de volledige batterijcapaciteit laden.
+            // Reden: we weten niet wat onderweg geladen is en trucks komen nooit op 0% binnen
+            // — distance × kWh/km is daarom een onbetrouwbare proxy voor de echte laadbehoefte.
+            // Capaciteit (default 590 kWh) komt uit de linker paneel-input en is auditbaar.
+            var demandKwh = capacityKwh;
             if (demandKwh <= 0) continue;
 
             // Front-loaded charging: pull max power until energy budget is depleted.
@@ -582,9 +577,10 @@ public sealed partial class RouteAnalysisService
             {
                 peakPerHour.TryGetValue(hour, out var peak);
                 var rawKw = peak?.RequiredKw ?? 0;
-                var cappedKw = Math.Min(rawKw, siteLimitKw);
+                // Toon de werkelijke vraag (raw). Site-cap is een planning-constraint, geen fysica:
+                // het overschrijden ervan moet zichtbaar zijn voor sizing-beslissingen, niet weggepoetst.
                 var anomalyFlag = rawKw > siteLimitKw * 1.001;
-                var requiredKw = Math.Round(cappedKw, 0);
+                var requiredKw = Math.Round(rawKw, 0);
                 return new PowerHourlyCell(
                     hour,
                     $"{hour:00}:00",
@@ -633,13 +629,13 @@ public sealed partial class RouteAnalysisService
                     {
                         var scaledKw = cell.RequiredKw * scale;
                         var anomaly = cell.AnomalyFlag || scaledKw > siteLimitKw * 1.001;
-                        var capped = Math.Min(scaledKw, siteLimitKw);
+                        // Raw waarde tonen (geen cap); anomaly flag markeert overschrijdingen.
                         return cell with
                         {
                             Vehicles = (long)Math.Ceiling(cell.Vehicles * scale),
                             Events = (long)Math.Ceiling(cell.Events * scale),
-                            RequiredKw = Math.Round(capped, 0),
-                            RequiredMw = Math.Round(capped / 1000.0, 2),
+                            RequiredKw = Math.Round(scaledKw, 0),
+                            RequiredMw = Math.Round(scaledKw / 1000.0, 2),
                             AnomalyFlag = anomaly,
                         };
                     }).ToArray());
@@ -756,12 +752,11 @@ public sealed partial class RouteAnalysisService
     {
         var assumptions = new List<string>
         {
-            "Vermogensvraag per voertuig: front-loaded laadcurve. Vermogen = MaxVehicleKw zolang energie < min(distance × kWh/km, capacity × (target-min)/100); daarna 0.",
+            "Vermogensvraag per voertuig: conservatief = volledige batterijcapaciteit per stop (geen distance-aanname; we weten niet wat onderweg is geladen).",
+            "Front-loaded laadcurve: vermogen = MaxVehicleKw zolang energie < capaciteit; daarna 0. Voorbeeld: 590 kWh @ 400 kW → uur 1: 400 kW, uur 2: 190 kW, uur 3+: 0.",
             "Default batterijcapaciteit: 590 kWh, instelbaar via de Batterijcapaciteit-input.",
-            "Default SoC-venster: laden van 15% naar 80% (= 383.5 kWh bij 590 kWh accu).",
             "Default voertuigacceptatie: 400 kW per truck; MCS-selectie verhoogt dit naar 1.500 kW.",
-            "Default kWh/km: 1.2 (configurable per voertuigklasse × seizoen via RouteAnalysisDefaults).",
-            "Site-limit: per-uur aggregatie wordt gecapped op SiteLimitMw (default 1.4 MW); overschrijdingen krijgen anomaly_flag = true.",
+            "Site-limit (SiteLimitMw, default 1.4 MW): planning-constraint. Cellen tonen de werkelijke vraag; cellen boven de cap krijgen anomaly_flag = true en zijn visueel gemarkeerd.",
         };
         assumptions.Add("Laadvensters: wait_task_available, wait_after, wait_action, pause.");
         assumptions.Add("Instroom Madeleine: 2026=3 trekkers/1 bakwagen; 2027=10/16; 2028=21/25; 2029=38/25; 2030=56/25; 2031=75/25.");

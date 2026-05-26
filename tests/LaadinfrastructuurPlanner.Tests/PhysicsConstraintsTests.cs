@@ -30,9 +30,11 @@ public sealed class PhysicsConstraintsTests : IDisposable
     }
 
     [Fact]
-    public async Task PowerProfileNeverExceedsSiteLimit()
+    public async Task AnomalyFlagSetWhenAggregateExceedsSiteLimit()
     {
-        var siteLimitMw = 1.4;
+        // Site-cap is geen hard clamp meer — alleen anomaly indicator.
+        // Met deliberate lage site-limit moet elke significante cel anomaly_flag = true krijgen.
+        var siteLimitMw = 0.01;
         var response = await _service.GetPowerProfilesAsync(new PowerProfileRequest
         {
             TopLocations = 10,
@@ -40,15 +42,14 @@ public sealed class PhysicsConstraintsTests : IDisposable
             MaxVehicleKw = 400,
         });
 
-        foreach (var location in response.Locations)
-        {
-            foreach (var hour in location.HourlyProfile)
-            {
-                Assert.True(
-                    hour.RequiredKw <= siteLimitMw * 1000.0 + 1.0,
-                    $"required_kw {hour.RequiredKw} exceeds site limit {siteLimitMw * 1000} at {location.Name} hour {hour.Hour}");
-            }
-        }
+        var significantCells = response.Locations
+            .SelectMany(loc => loc.HourlyProfile.Where(h => h.RequiredKw > siteLimitMw * 1000))
+            .ToArray();
+
+        if (significantCells.Length == 0) return; // niets te checken in deze testdata
+
+        Assert.True(significantCells.All(c => c.AnomalyFlag),
+            $"{significantCells.Count(c => !c.AnomalyFlag)} cellen overschrijden site-limit zonder anomaly_flag");
     }
 
     [Fact]
@@ -68,21 +69,24 @@ public sealed class PhysicsConstraintsTests : IDisposable
     }
 
     [Fact]
-    public async Task ScenarioPercolatesNoPhysicallyImpossibleValues()
+    public async Task ScenarioVehiclePowerNeverExceedsMaxVehicleKwTimesVehicles()
     {
+        // Fysica check: vermogen per uur kan nooit hoger zijn dan MaxVehicleKw × aantal voertuigen
+        // (één voertuig kan maximaal MaxVehicleKw trekken; aggregaat = som van voertuigen).
+        var maxKw = 400.0;
         var response = await _service.GetPowerProfilesAsync(new PowerProfileRequest
         {
             TopLocations = 5,
-            SiteLimitMw = 1.4,
+            MaxVehicleKw = maxKw,
             ScenarioYears = [2030],
         });
 
-        foreach (var location in response.Locations)
         foreach (var scenario in response.Scenarios)
         foreach (var cell in scenario.HourlyProfile)
         {
-            Assert.True(cell.RequiredKw <= 1.4 * 1000.0 + 1.0,
-                $"scenario {scenario.Year} hour {cell.Hour} required_kw {cell.RequiredKw} exceeds site limit");
+            var ceiling = maxKw * Math.Max(1, cell.Vehicles);
+            Assert.True(cell.RequiredKw <= ceiling + 1.0,
+                $"scenario {scenario.Year} hour {cell.Hour}: required_kw {cell.RequiredKw} > vehicles({cell.Vehicles}) × maxKw ({ceiling})");
         }
     }
 
@@ -107,21 +111,15 @@ public sealed class PhysicsConstraintsTests : IDisposable
     }
 
     [Fact]
-    public async Task ChargingEnergyPerVehicleNeverExceedsUsableSoc()
+    public async Task ChargingEnergyPerVehicleNeverExceedsCapacity()
     {
         var capacityKwh = 590.0;
-        var minSoc = 15.0;
-        var targetSoc = 80.0;
-        var usable = capacityKwh * (targetSoc - minSoc) / 100.0;
 
         var response = await _service.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
         {
             LocationId = "auto:52.0000:5.0000",
             CapacityKwh = capacityKwh,
-            MinSocPct = minSoc,
-            TargetSocPct = targetSoc,
             MaxVehicleKw = 400,
-            SiteLimitMw = 1.4,
         });
 
         if (response.Profile is null) return; // location not present in test parquet — skip silently
@@ -129,8 +127,10 @@ public sealed class PhysicsConstraintsTests : IDisposable
         {
             foreach (var vehicle in hour.VehicleDemands)
             {
-                Assert.True(vehicle.DemandKwh <= usable + 1.0,
-                    $"vehicle {vehicle.Wagencode} demand {vehicle.DemandKwh} kWh exceeds usable {usable} kWh");
+                // Per voertuig per uur-slot: energie kan nooit hoger zijn dan capacity (en
+                // praktisch ook lager dan MaxVehicleKw × 1h = 400 kWh).
+                Assert.True(vehicle.DemandKwh <= capacityKwh + 1.0,
+                    $"vehicle {vehicle.Wagencode} demand {vehicle.DemandKwh} kWh > capacity {capacityKwh}");
             }
         }
     }

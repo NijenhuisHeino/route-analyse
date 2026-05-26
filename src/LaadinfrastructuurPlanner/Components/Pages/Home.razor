@@ -332,9 +332,9 @@
                             </button>
                             @foreach (var cell in profile.HourlyProfile.OrderBy(x => x.Hour))
                             {
-                                <button class="power-cell"
+                                <button class="power-cell @(cell.AnomalyFlag ? "is-over-cap" : "")"
                                         style="@PowerCellStyle(cell.RequiredKw, PowerProfiles.Locations)"
-                                        title="@($"{cell.Label}: {FormatPower(cell.RequiredKw)} · {cell.Vehicles:N0} voertuigen")"
+                                        title="@($"{cell.Label}: {FormatPower(cell.RequiredKw)} · {cell.Vehicles:N0} voertuigen{(cell.AnomalyFlag ? " · ⚠ boven site-limit" : "")}")"
                                         @onclick="() => OpenPowerDemandPopupAsync(profile, cell)">
                                     <span>@(cell.RequiredKw > 0 ? FormatPower(cell.RequiredKw) : "")</span>
                                 </button>
@@ -646,6 +646,7 @@
                     <table>
                         <thead>
                             <tr>
+                                <th>Export</th>
                                 <th>Locatie</th>
                                 <th>Voertuigen</th>
                                 <th>Stops</th>
@@ -656,6 +657,12 @@
                             @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
                             {
                                 <tr>
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsExportStopSelected(row)"
+                                               aria-label="@($"Stoplocatie toevoegen aan export: {StopExportLabel(row)}")"
+                                               @onchange="e => ToggleExportStop(row, e.Value is true)" />
+                                    </td>
                                     <td>
                                         <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
                                         <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
@@ -679,6 +686,7 @@
                     <table>
                         <thead>
                             <tr>
+                                <th>Export</th>
                                 <th>Segment</th>
                                 <th>Rijrichting</th>
                                 <th>Lengte</th>
@@ -690,6 +698,12 @@
                             @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
                             {
                                 <tr>
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsExportRoadSelected(row)"
+                                               aria-label="@($"Wegvlak toevoegen aan export: {RoadExportLabel(row)}")"
+                                               @onchange="e => ToggleExportRoad(row, e.Value is true)" />
+                                    </td>
                                     <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
                                     <td>@row.Direction</td>
                                     <td>@row.LengthKm.ToString("N1") km</td>
@@ -701,6 +715,23 @@
                     </table>
                 </div>
             </div>
+        </section>
+
+        <section class="table-panel export-panel">
+            <div class="panel-heading">
+                <div>
+                    <h3>PDF-export</h3>
+                    <span>@SelectedExportCount selectie(s) gekozen</span>
+                </div>
+                <button @onclick="DownloadReportExportAsync" disabled="@(!CanDownloadReportExport)">
+                    @(IsExporting ? "Export maken..." : "PDF-export downloaden")
+                </button>
+            </div>
+            <p class="hint-text">De ZIP bevat een samenvattende PDF, manifest en CSV-bestanden met onderliggende ritregels per aangevinkte stoplocatie of wegvlak.</p>
+            @if (!string.IsNullOrWhiteSpace(ExportStatus))
+            {
+                <p class="export-status @(ExportStatusIsError ? "error" : "ok")">@ExportStatus</p>
+            }
         </section>
 
         <section class="simulation-panel">
@@ -790,6 +821,11 @@
     private int? SelectedDemandDay { get; set; }
     private int? SelectedDemandHour { get; set; }
     private VehicleDemandPopup? DemandPopup { get; set; }
+    private HashSet<string> ExportStopKeys { get; } = new(StringComparer.Ordinal);
+    private HashSet<string> ExportRoadKeys { get; } = new(StringComparer.Ordinal);
+    private bool IsExporting { get; set; }
+    private string? ExportStatus { get; set; }
+    private bool ExportStatusIsError { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
     private string DateFromText { get; set; } = "";
@@ -821,6 +857,8 @@
     private bool ChargerAccessSemiPublic { get; set; } = true;
     private bool ChargerAccessPrivate { get; set; }
     private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
+    private int SelectedExportCount => ExportStopKeys.Count + ExportRoadKeys.Count;
+    private bool CanDownloadReportExport => !IsBusy && !IsExporting && SelectedExportCount > 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -860,6 +898,7 @@
 
     private async Task ApplyFiltersAsync()
     {
+        ClearExportSelection();
         await LoadDataAsync();
         await RefreshMapAsync();
         await RefreshSelectedDetailAsync();
@@ -877,6 +916,7 @@
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        ClearExportSelection();
         await ClearSelectionHeatAsync();
 
         try
@@ -1015,6 +1055,34 @@
         }
     }
 
+    private async Task DownloadReportExportAsync()
+    {
+        if (!CanDownloadReportExport)
+        {
+            ExportStatus = "Selecteer minimaal één stoplocatie of wegvlak.";
+            ExportStatusIsError = true;
+            return;
+        }
+
+        IsExporting = true;
+        ExportStatus = "Export wordt opgebouwd...";
+        ExportStatusIsError = false;
+        try
+        {
+            await JS.InvokeVoidAsync("routePlannerExport.download", BuildReportExportRequest());
+            ExportStatus = "Export gedownload.";
+        }
+        catch (JSException ex)
+        {
+            ExportStatus = $"Export mislukt: {ex.Message}";
+            ExportStatusIsError = true;
+        }
+        finally
+        {
+            IsExporting = false;
+        }
+    }
+
     private async Task RefreshMapAsync()
     {
         if (!MapReady)
@@ -1113,6 +1181,104 @@
             Plugs = ScenarioPlugs,
             SiteLimitMw = ScenarioSiteLimitMw
         };
+    }
+
+    private ReportExportRequest BuildReportExportRequest()
+    {
+        var filter = BuildFilter();
+        var stopSelections = (Dashboard?.TopStops.Take(12) ?? [])
+            .Where(IsExportStopSelected)
+            .Select(row => new StopLocationExportSelection(row.Lat, row.Lon, StopExportLabel(row), 0.5))
+            .ToArray();
+        var roadSelections = (Dashboard?.TopRoadSegments.Take(12) ?? [])
+            .Where(IsExportRoadSelected)
+            .Select(row => new RoadExportSelection(
+                row.Lat1,
+                row.Lon1,
+                row.Lat2,
+                row.Lon2,
+                row.SelectionRadiusKm,
+                RoadExportLabel(row)))
+            .ToArray();
+
+        return new ReportExportRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            RoadThreshold = filter.RoadThreshold,
+            RoadTopPercent = filter.RoadTopPercent,
+            MarkerTopN = filter.MarkerTopN,
+            ZeZoneMode = filter.ZeZoneMode,
+            Scenario = BuildScenario(),
+            StopSelections = stopSelections,
+            RoadSelections = roadSelections
+        };
+    }
+
+    private void ToggleExportStop(DashboardStop row, bool selected)
+    {
+        ToggleKey(ExportStopKeys, StopExportKey(row), selected);
+        ExportStatus = null;
+    }
+
+    private void ToggleExportRoad(RoadLine row, bool selected)
+    {
+        ToggleKey(ExportRoadKeys, RoadExportKey(row), selected);
+        ExportStatus = null;
+    }
+
+    private bool IsExportStopSelected(DashboardStop row) => ExportStopKeys.Contains(StopExportKey(row));
+
+    private bool IsExportRoadSelected(RoadLine row) => ExportRoadKeys.Contains(RoadExportKey(row));
+
+    private static void ToggleKey(HashSet<string> keys, string key, bool selected)
+    {
+        if (selected)
+        {
+            keys.Add(key);
+        }
+        else
+        {
+            keys.Remove(key);
+        }
+    }
+
+    private void ClearExportSelection()
+    {
+        ExportStopKeys.Clear();
+        ExportRoadKeys.Clear();
+        ExportStatus = null;
+        ExportStatusIsError = false;
+    }
+
+    private static string StopExportKey(DashboardStop row)
+    {
+        return FormattableString.Invariant($"stop:{row.Lat:0.000000}:{row.Lon:0.000000}");
+    }
+
+    private static string RoadExportKey(RoadLine row)
+    {
+        return string.IsNullOrWhiteSpace(row.SegmentId)
+            ? FormattableString.Invariant($"road:{row.Lat1:0.000000}:{row.Lon1:0.000000}:{row.Lat2:0.000000}:{row.Lon2:0.000000}")
+            : row.SegmentId;
+    }
+
+    private static string StopExportLabel(DashboardStop row)
+    {
+        return string.IsNullOrWhiteSpace(row.Name)
+            ? row.Address
+            : row.Name;
+    }
+
+    private static string RoadExportLabel(RoadLine row)
+    {
+        var centerLat = (row.Lat1 + row.Lat2) / 2.0;
+        var centerLon = (row.Lon1 + row.Lon2) / 2.0;
+        return FormattableString.Invariant($"Wegvlak {row.Direction} {centerLat:0.000}, {centerLon:0.000}");
     }
 
     [JSInvokable]

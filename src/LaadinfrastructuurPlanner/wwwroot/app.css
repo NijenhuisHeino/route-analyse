@@ -458,6 +458,40 @@ td span,
   font-size: 12px;
 }
 
+.export-panel {
+  margin-bottom: 16px;
+}
+
+.export-panel .hint-text {
+  padding: 0 15px 12px;
+}
+
+.export-status {
+  margin: 0 15px 14px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.export-status.ok {
+  border: 1px solid #b7e3c3;
+  background: #edf9f0;
+  color: var(--eta-ok);
+}
+
+.export-status.error {
+  border: 1px solid #f2b7b7;
+  background: #fff1f1;
+  color: var(--eta-danger);
+}
+
+.table-panel input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--eta-yellow);
+}
+
 .route-map {
   width: 100%;
   height: min(64vh, 660px);
@@ -1200,6 +1234,13 @@ td span {
   max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.power-cell.is-over-cap {
+  outline: 2px solid #d92e2e;
+  outline-offset: -2px;
+  background: rgba(217, 46, 46, var(--power-alpha, 0.4));
+  color: #5a0d0d;
 }
 
 .power-profile-summary {
