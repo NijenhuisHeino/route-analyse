@@ -68,18 +68,76 @@
 
         <section class="filter-group">
             <label>Kaartlagen</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowStopHeat" @bind:after="RefreshMapAsync" /> Stopdrukte</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowMarkers" @bind:after="RefreshMapAsync" /> Toplocaties</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowRoads" @bind:after="RefreshMapAsync" /> Wegvlakken</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowRoadHeat" @bind:after="RefreshMapAsync" /> Wegdrukte</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowOvernight" @bind:after="RefreshMapAsync" /> Vaste stilstandlocaties</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowStandplaatsen" @bind:after="RefreshMapAsync" /> Standplaatsen (PostNL-wagenpark)</label>
-            <label class="toggle"><input type="checkbox" @bind="ShowChargers" @bind:after="RefreshMapAsync" /> Laadlocaties</label>
-            <p class="hint-text">Wegvlakken zijn klikbare lijnsegmenten voor detailanalyse. Wegdrukte is een vloeiende heatmap van passages op het wegennet.</p>
-            @if (ShowStandplaatsen)
-            {
-                <p class="hint-text disclaimer">Standplaatsen zijn ruw gegeocodeerd op plaatsnaam; markers kunnen afwijken van het werkelijke adres.</p>
-            }
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-stopdrukte"><input id="layer-stopdrukte" type="checkbox" @bind="ShowStopHeat" @bind:after="RefreshMapAsync" /> Stopdrukte</label>
+                    <button type="button" class='@LayerInfoButtonClass("stopdrukte")' aria-label="Uitleg over Stopdrukte" aria-expanded='@LayerInfoExpanded("stopdrukte")' aria-controls="layer-info-stopdrukte" @onclick='() => ToggleLayerInfo("stopdrukte")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "stopdrukte")
+                {
+                    <p id="layer-info-stopdrukte" class="layer-info-panel">Heatmap uit ritdata-stops. De kleur wordt zwaarder bij veel stops en/of lange stoptijd. Dit zijn operationele stops, niet automatisch standplaatsen: klanten, hubs en routepunten kunnen dus rood zijn zonder dat daar een wagenparkstandplaats ligt.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-toplocaties"><input id="layer-toplocaties" type="checkbox" @bind="ShowMarkers" @bind:after="RefreshMapAsync" /> Toplocaties</label>
+                    <button type="button" class='@LayerInfoButtonClass("toplocaties")' aria-label="Uitleg over Toplocaties" aria-expanded='@LayerInfoExpanded("toplocaties")' aria-controls="layer-info-toplocaties" @onclick='() => ToggleLayerInfo("toplocaties")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "toplocaties")
+                {
+                    <p id="layer-info-toplocaties" class="layer-info-panel">Top stoplocaties uit dezelfde ritdata als Stopdrukte, gegroepeerd op afgeronde coordinaten. Een groter markerpunt betekent meer unieke voertuigen en/of meer stops op die plek.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-wegvlakken"><input id="layer-wegvlakken" type="checkbox" @bind="ShowRoads" @bind:after="RefreshMapAsync" /> Wegvlakken</label>
+                    <button type="button" class='@LayerInfoButtonClass("wegvlakken")' aria-label="Uitleg over Wegvlakken" aria-expanded='@LayerInfoExpanded("wegvlakken")' aria-controls="layer-info-wegvlakken" @onclick='() => ToggleLayerInfo("wegvlakken")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "wegvlakken")
+                {
+                    <p id="layer-info-wegvlakken" class="layer-info-panel">Klikbare lijnsegmenten uit de wegpassage-cache. Ze laten zien waar routes over het wegennet lopen en gebruiken de minimum-passages en zichtbare-wegdata filters.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-wegdrukte"><input id="layer-wegdrukte" type="checkbox" @bind="ShowRoadHeat" @bind:after="RefreshMapAsync" /> Wegdrukte</label>
+                    <button type="button" class='@LayerInfoButtonClass("wegdrukte")' aria-label="Uitleg over Wegdrukte" aria-expanded='@LayerInfoExpanded("wegdrukte")' aria-controls="layer-info-wegdrukte" @onclick='() => ToggleLayerInfo("wegdrukte")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "wegdrukte")
+                {
+                    <p id="layer-info-wegdrukte" class="layer-info-panel">Vloeiende heatmap van dezelfde wegpassages als Wegvlakken. Deze laag is bedoeld voor patroonherkenning op corridors, niet voor detailselectie of klikken op losse segmenten.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-vaste-stilstandlocaties"><input id="layer-vaste-stilstandlocaties" type="checkbox" @bind="ShowOvernight" @bind:after="RefreshMapAsync" /> Vaste stilstandlocaties</label>
+                    <button type="button" class='@LayerInfoButtonClass("vaste-stilstandlocaties")' aria-label="Uitleg over Vaste stilstandlocaties" aria-expanded='@LayerInfoExpanded("vaste-stilstandlocaties")' aria-controls="layer-info-vaste-stilstandlocaties" @onclick='() => ToggleLayerInfo("vaste-stilstandlocaties")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "vaste-stilstandlocaties")
+                {
+                    <p id="layer-info-vaste-stilstandlocaties" class="layer-info-panel">Afgeleid uit lange stilstand- en overnacht-events in ritdata. Geel of rood geeft verwachte lokale laadvraag of laadtekort op basis van de huidige voertuigscenario-instellingen.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-standplaatsen"><input id="layer-standplaatsen" type="checkbox" @bind="ShowStandplaatsen" @bind:after="RefreshMapAsync" /> Standplaatsen (PostNL-wagenpark)</label>
+                    <button type="button" class='@LayerInfoButtonClass("standplaatsen")' aria-label="Uitleg over Standplaatsen" aria-expanded='@LayerInfoExpanded("standplaatsen")' aria-controls="layer-info-standplaatsen" @onclick='() => ToggleLayerInfo("standplaatsen")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "standplaatsen")
+                {
+                    <p id="layer-info-standplaatsen" class="layer-info-panel disclaimer">Depot/opstapplaats uit de wagenpark-Excel, gekoppeld of gegeocodeerd naar adressen. Deze laag kan afwijken van Stopdrukte omdat standplaatsen thuisbases zijn, terwijl stopdrukte ook klanten, hubs of routepunten kan zijn en filters op periode, vervoerder en voertuig meedoen. Review-markeringen vragen handmatige controle.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-laadlocaties"><input id="layer-laadlocaties" type="checkbox" @bind="ShowChargers" @bind:after="RefreshMapAsync" /> Laadlocaties</label>
+                    <button type="button" class='@LayerInfoButtonClass("laadlocaties")' aria-label="Uitleg over Laadlocaties" aria-expanded='@LayerInfoExpanded("laadlocaties")' aria-controls="layer-info-laadlocaties" @onclick='() => ToggleLayerInfo("laadlocaties")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "laadlocaties")
+                {
+                    <p id="layer-info-laadlocaties" class="layer-info-panel">Externe publieke, semi-publieke en private HDV-laadlocaties. De zichtbare punten worden gefilterd op vermogen, stekkers, toegang en of een locatie gereserveerd is.</p>
+                }
+            </div>
         </section>
 
         <section class="filter-grid demand-controls">
@@ -820,7 +878,23 @@
     private bool ChargerAccessPublic { get; set; } = true;
     private bool ChargerAccessSemiPublic { get; set; } = true;
     private bool ChargerAccessPrivate { get; set; }
+    private string? OpenLayerInfoId { get; set; }
     private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
+
+    private void ToggleLayerInfo(string layerId)
+    {
+        OpenLayerInfoId = OpenLayerInfoId == layerId ? null : layerId;
+    }
+
+    private string LayerInfoButtonClass(string layerId)
+    {
+        return OpenLayerInfoId == layerId ? "layer-info-button is-open" : "layer-info-button";
+    }
+
+    private string LayerInfoExpanded(string layerId)
+    {
+        return OpenLayerInfoId == layerId ? "true" : "false";
+    }
 
     protected override async Task OnInitializedAsync()
     {
