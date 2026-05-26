@@ -144,11 +144,33 @@ td span,
 }
 
 .control-heading {
-  margin: 0 0 2px;
-  color: var(--eta-text);
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 6px;
+  padding: 8px 11px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(249, 188, 19, 0.22) 0%, rgba(246, 161, 25, 0.08) 100%);
+  border-left: 3px solid var(--eta-yellow);
+  color: var(--eta-purple);
+  font-size: 12px;
   font-weight: 800;
   line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.filter-group:has(.control-heading) {
+  position: relative;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--eta-border);
+}
+
+.filter-group:has(.control-heading):first-of-type {
+  margin-top: 18px;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .filter-grid input,
