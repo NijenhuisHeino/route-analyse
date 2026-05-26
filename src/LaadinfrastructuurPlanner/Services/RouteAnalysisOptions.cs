@@ -24,7 +24,10 @@ public static class RouteAnalysisOptionsFactory
         var repoRoot = !string.IsNullOrWhiteSpace(configuredRoot)
             ? Path.GetFullPath(configuredRoot)
             : Path.GetFullPath(Path.Combine(contentRoot, "..", ".."));
-        var cacheDir = Path.Combine(repoRoot, ".cache");
+        var publishedCacheDir = Path.Combine(contentRoot, ".cache");
+        var cacheDir = Directory.Exists(publishedCacheDir)
+            ? publishedCacheDir
+            : Path.Combine(repoRoot, ".cache");
         var plannerCacheDir = Path.Combine(cacheDir, "planner");
         var originalCsvDir = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_ORIGINAL_CSV_DIR");
         var externalCacheDir = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_EXTERNAL_CACHE_DIR");

@@ -10,4 +10,15 @@
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="../../.cache/*.parquet">
+      <Link>.cache/%(Filename)%(Extension)</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="../../.cache/zez_pc6.csv">
+      <Link>.cache/%(Filename)%(Extension)</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
