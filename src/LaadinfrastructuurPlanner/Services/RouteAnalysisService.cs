@@ -1230,7 +1230,12 @@ public sealed partial class RouteAnalysisService
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is null or DBNull ? 0 : Convert.ToInt64(result);
+        return result switch
+        {
+            null or DBNull => 0,
+            System.Numerics.BigInteger bi => (long)bi,
+            _ => Convert.ToInt64(result),
+        };
     }
 
     private static async Task<string[]> QueryStringArrayAsync(DuckDBConnection connection, string sql, CancellationToken cancellationToken)

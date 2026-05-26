@@ -1,0 +1,8 @@
+vehicle_id,kenteken,date,distance_km,meter_kwh,ambient_temp_c,payload_kg,notes
+# Fill one row per vehicle per day with measured energy from telematics or charger logs.
+# Required: vehicle_id, date, distance_km, meter_kwh.
+# Optional: kenteken (license plate), ambient_temp_c (avg outside), payload_kg, notes.
+# Used by: scripts/backtest.py (to be added) which computes implied kWh/km and MAPE vs. tool prediction.
+# Example:
+W001,12-BCD-3,2026-01-15,247.3,318.9,4.2,8200,winter test ronde
+W002,98-XYZ-7,2026-01-15,189.0,212.4,4.2,6500,

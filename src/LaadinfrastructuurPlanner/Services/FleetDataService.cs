@@ -275,6 +275,7 @@ public sealed class FleetDataService
             if (!_geocodeLoaded)
             {
                 _geocodeCache = LoadGeocodeCache(GeocodeCachePath());
+                ApplyManualOverrides(_geocodeCache, _options.GeocodingOverridePath);
                 _geocodeLoaded = true;
             }
 
@@ -406,6 +407,45 @@ public sealed class FleetDataService
     {
         var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(path, json);
+    }
+
+    private static void ApplyManualOverrides(Dictionary<string, GeocodeEntry> cache, string? overridePath)
+    {
+        if (string.IsNullOrWhiteSpace(overridePath) || !File.Exists(overridePath))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var line in File.ReadAllLines(overridePath).Skip(1))
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+                {
+                    continue;
+                }
+                var parts = line.Split(',');
+                if (parts.Length < 3)
+                {
+                    continue;
+                }
+                var name = parts[0].Trim().Trim('"');
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+                if (!double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lat)
+                    || !double.TryParse(parts[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
+                {
+                    continue;
+                }
+                var source = parts.Length > 3 ? parts[3].Trim().Trim('"') : "manual";
+                cache[name] = new GeocodeEntry(lat, lon, name + " (override)", source);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private async Task<Dictionary<string, TripStat>> ComputeTripStatsAsync(IReadOnlyList<FleetVehicleRaw> vehicles, CancellationToken cancellationToken)

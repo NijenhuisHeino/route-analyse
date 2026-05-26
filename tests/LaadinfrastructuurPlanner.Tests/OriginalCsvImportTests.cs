@@ -48,7 +48,7 @@ public sealed class OriginalCsvImportTests : IDisposable
             Scenario = new ChargingScenario { KwhPerKm = 1.0, CapacityKwh = 200, TargetSocPct = 80, MinSocPct = 15 }
         });
         var depot = Assert.Single(locations.Locations);
-        Assert.Equal("auto:52.000:5.000", depot.DepotId);
+        Assert.Equal("auto:52.0000:5.0000", depot.DepotId);
         Assert.Equal(180, depot.P95DayKm);
 
         var detail = await service.GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest { DepotId = depot.DepotId });
@@ -126,15 +126,19 @@ public sealed class OriginalCsvImportTests : IDisposable
         Assert.Equal("ok", profiles.Status);
         var nieuwegein = Assert.Single(profiles.Locations);
         Assert.Contains("Groteweerd", nieuwegein.Address, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(182, nieuwegein.PeakKw);
+        // Conservatieve model: demand = volledige capaciteit (590 kWh) per voertuig per stop.
+        // Front-loaded @ MaxVehicleKw (400) → time-to-full = 1.475 h.
+        // Window 22:15 → 01:30. Hour 22 (overlap 0.75h) = 300 kW. Hour 23 (overlap 0.725h) = 290 kW.
+        // Hours 0, 1: battery vol → 0 kW. Peak = 300 kW.
+        Assert.Equal(300, nieuwegein.PeakKw);
         Assert.Equal(1, nieuwegein.UniqueOwnVehicles);
         Assert.Equal(0, nieuwegein.UniqueCharterVehicles);
         Assert.Equal(24, nieuwegein.HourlyProfile.Length);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 22 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 182 && h.Vehicles == 1);
-        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 23 && h.RequiredKw == 182);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 22 && h.RequiredKw == 300 && h.Vehicles == 1);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 23 && h.RequiredKw == 290);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 0 && h.RequiredKw == 0);
+        Assert.Contains(nieuwegein.HourlyProfile, h => h.Hour == 1 && h.RequiredKw == 0);
+        Assert.Contains(profiles.Heatmap, h => h.LocationId == nieuwegein.LocationId && h.Hour == 22 && h.RequiredKw == 300);
 
         var detail = await service.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
         {
@@ -147,15 +151,15 @@ public sealed class OriginalCsvImportTests : IDisposable
 
         Assert.Equal("ok", detail.Status);
         Assert.Equal(nieuwegein.LocationId, detail.Profile?.LocationId);
-        var hour23 = Assert.Single(detail.Profile!.HourlyProfile, h => h.Hour == 23);
-        var powerVehicle = Assert.Single(hour23.VehicleDemands);
+        var hour22 = Assert.Single(detail.Profile!.HourlyProfile, h => h.Hour == 22);
+        var powerVehicle = Assert.Single(hour22.VehicleDemands);
         Assert.Equal("001", powerVehicle.Wagencode);
         Assert.Equal("11-BZX-8", powerVehicle.Kenteken);
         Assert.Equal("own", powerVehicle.VehicleClass);
-        Assert.Equal(590, powerVehicle.DemandKwh);
-        Assert.Equal(182, powerVehicle.RequiredKw);
-        Assert.Equal(3.25, powerVehicle.StandingHours);
-        Assert.Equal(new DateOnly(2026, 1, 1), hour23.Date);
+        // Hour 22 krijgt 400 kW × 0.75h = 300 kWh aan demand voor dit voertuig.
+        Assert.InRange(powerVehicle.DemandKwh, 295, 305);
+        Assert.InRange(powerVehicle.RequiredKw, 295, 305);
+        Assert.Equal(new DateOnly(2026, 1, 1), hour22.Date);
         Assert.NotEmpty(detail.DailyMetrics);
         Assert.Contains(detail.Scenarios, s => s.Year == 2027 && s.HourlyProfile.Length == 24);
         Assert.Contains(detail.Scenarios, s => s.Year == 2030 && s.Mode == "linear");
@@ -171,7 +175,10 @@ public sealed class OriginalCsvImportTests : IDisposable
         });
         var cappedDepot = Assert.Single(cappedCharter.Locations);
         Assert.Equal("Depot B", cappedDepot.Address);
-        Assert.Equal(400, cappedDepot.PeakKw);
+        // Charter pause 12:00-12:45 (45 min). Demand = capacity = 590 kWh.
+        // Time-to-full @ 400 kW = 1.475 h, gelimiteerd door 0.75h presence.
+        // Energy hour 12 = 400 × 0.75 = 300 kWh → 300 kW avg.
+        Assert.InRange(cappedDepot.PeakKw, 295, 305);
 
         var mcsCharter = await service.GetPowerProfilesAsync(new PowerProfileRequest
         {
@@ -183,7 +190,8 @@ public sealed class OriginalCsvImportTests : IDisposable
             MaxVehicleKw = 1500,
         });
         var mcsDepot = Assert.Single(mcsCharter.Locations);
-        Assert.Equal(787, mcsDepot.PeakKw);
+        // MCS 1500 kW: time-to-full = 590/1500 = 0.393 h. Volle 590 kWh in 1 hour-slot → 590 kW avg.
+        Assert.InRange(mcsDepot.PeakKw, 585, 595);
 
         var diagnostics = await service.GetPowerDiagnosticsAsync(new AnalysisFilter());
         Assert.True(diagnostics.RoutesWithoutWaitWindow > 0);

@@ -184,6 +184,121 @@
             <div class="metric"><span>Stopduur (uur)</span><strong>@FormatNumber(Summary?.TotalDwellHours)</strong></div>
         </section>
 
+        <section class="map-panel">
+            <div class="panel-heading">
+                <h3>Kaart</h3>
+                <span id="map-status">Klaar</span>
+            </div>
+            <div class="map-frame">
+                <div id="route-map" class="route-map"></div>
+                <aside class="map-legend @(LegendCollapsed ? "is-collapsed" : "")" aria-label="Legenda kaartlagen">
+                    <div class="legend-heading">
+                        <strong>Legenda</strong>
+                        @if (!LegendCollapsed)
+                        {
+                            <span>Actieve lagen</span>
+                        }
+                        <button type="button"
+                                class="legend-toggle"
+                                title="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
+                                aria-label="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
+                                @onclick="() => LegendCollapsed = !LegendCollapsed">
+                            @(LegendCollapsed ? "+" : "-")
+                        </button>
+                    </div>
+
+                    @if (!LegendCollapsed && ShowStopHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient stop-gradient"></span>
+                            <div>
+                                <strong>Stopdrukte</strong>
+                                <span>Blauw naar rood: van beperkte naar zeer hoge stopdrukte.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowMarkers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol stop-marker"></span>
+                            <div>
+                                <strong>Toplocaties</strong>
+                                <span>Blauwe rondjes met witte rand; groter betekent meer voertuigen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowChargers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol charger-marker"></span>
+                            <div>
+                                <strong>Laadlocaties</strong>
+                                <span>Groene rondjes met witte rand; groter betekent hoger vermogen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowOvernight)
+                    {
+                        <div class="legend-item split">
+                            <span class="legend-symbol overnight-ok"></span>
+                            <span class="legend-symbol overnight-shortage"></span>
+                            <div>
+                                <strong>Vaste stilstandlocaties</strong>
+                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowStandplaatsen)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol standplaats-marker"></span>
+                            <div>
+                                <strong>Standplaatsen (wagenpark)</strong>
+                                <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowRoads)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-line road-line"></span>
+                            <div>
+                                <strong>Wegvlakken</strong>
+                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowRoadHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient road-gradient"></span>
+                            <div>
+                                <strong>Wegdrukte</strong>
+                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && SelectedDetail?.SelectionType == "stop")
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient selection-gradient"></span>
+                            <div>
+                                <strong>Vertrekroutes</strong>
+                                <span>Groen naar rood: routes vanaf de gekozen stoplocatie na een vaste stilstandperiode.</span>
+                            </div>
+                        </div>
+                    }
+                </aside>
+            </div>
+        </section>
+
         @if (PowerProfiles is not null)
         {
             <section class="table-panel power-profile-panel">
@@ -217,9 +332,9 @@
                             </button>
                             @foreach (var cell in profile.HourlyProfile.OrderBy(x => x.Hour))
                             {
-                                <button class="power-cell"
+                                <button class="power-cell @(cell.AnomalyFlag ? "is-over-cap" : "")"
                                         style="@PowerCellStyle(cell.RequiredKw, PowerProfiles.Locations)"
-                                        title="@($"{cell.Label}: {FormatPower(cell.RequiredKw)} · {cell.Vehicles:N0} voertuigen")"
+                                        title="@($"{cell.Label}: {FormatPower(cell.RequiredKw)} · {cell.Vehicles:N0} voertuigen{(cell.AnomalyFlag ? " · ⚠ boven site-limit" : "")}")"
                                         @onclick="() => OpenPowerDemandPopupAsync(profile, cell)">
                                     <span>@(cell.RequiredKw > 0 ? FormatPower(cell.RequiredKw) : "")</span>
                                 </button>
@@ -377,121 +492,6 @@
             </section>
         }
 
-        <section class="map-panel">
-            <div class="panel-heading">
-                <h3>Kaart</h3>
-                <span id="map-status">Klaar</span>
-            </div>
-            <div class="map-frame">
-                <div id="route-map" class="route-map"></div>
-                <aside class="map-legend @(LegendCollapsed ? "is-collapsed" : "")" aria-label="Legenda kaartlagen">
-                    <div class="legend-heading">
-                        <strong>Legenda</strong>
-                        @if (!LegendCollapsed)
-                        {
-                            <span>Actieve lagen</span>
-                        }
-                        <button type="button"
-                                class="legend-toggle"
-                                title="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
-                                aria-label="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
-                                @onclick="() => LegendCollapsed = !LegendCollapsed">
-                            @(LegendCollapsed ? "+" : "-")
-                        </button>
-                    </div>
-
-                    @if (!LegendCollapsed && ShowStopHeat)
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient stop-gradient"></span>
-                            <div>
-                                <strong>Stopdrukte</strong>
-                                <span>Blauw naar rood: van beperkte naar zeer hoge stopdrukte.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowMarkers)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol stop-marker"></span>
-                            <div>
-                                <strong>Toplocaties</strong>
-                                <span>Blauwe rondjes met witte rand; groter betekent meer voertuigen.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowChargers)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol charger-marker"></span>
-                            <div>
-                                <strong>Laadlocaties</strong>
-                                <span>Groene rondjes met witte rand; groter betekent hoger vermogen.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowOvernight)
-                    {
-                        <div class="legend-item split">
-                            <span class="legend-symbol overnight-ok"></span>
-                            <span class="legend-symbol overnight-shortage"></span>
-                            <div>
-                                <strong>Vaste stilstandlocaties</strong>
-                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowStandplaatsen)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol standplaats-marker"></span>
-                            <div>
-                                <strong>Standplaatsen (wagenpark)</strong>
-                                <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowRoads)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-line road-line"></span>
-                            <div>
-                                <strong>Wegvlakken</strong>
-                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowRoadHeat)
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient road-gradient"></span>
-                            <div>
-                                <strong>Wegdrukte</strong>
-                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && SelectedDetail?.SelectionType == "stop")
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient selection-gradient"></span>
-                            <div>
-                                <strong>Vertrekroutes</strong>
-                                <span>Groen naar rood: routes vanaf de gekozen stoplocatie na een vaste stilstandperiode.</span>
-                            </div>
-                        </div>
-                    }
-                </aside>
-            </div>
-        </section>
-
         @if (SelectedDetail is not null)
         {
             <section class="selection-panel">
@@ -646,6 +646,7 @@
                     <table>
                         <thead>
                             <tr>
+                                <th>Export</th>
                                 <th>Locatie</th>
                                 <th>Voertuigen</th>
                                 <th>Stops</th>
@@ -656,6 +657,12 @@
                             @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
                             {
                                 <tr>
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsExportStopSelected(row)"
+                                               aria-label="@($"Stoplocatie toevoegen aan export: {StopExportLabel(row)}")"
+                                               @onchange="e => ToggleExportStop(row, e.Value is true)" />
+                                    </td>
                                     <td>
                                         <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
                                         <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
@@ -679,6 +686,7 @@
                     <table>
                         <thead>
                             <tr>
+                                <th>Export</th>
                                 <th>Segment</th>
                                 <th>Rijrichting</th>
                                 <th>Lengte</th>
@@ -690,6 +698,12 @@
                             @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
                             {
                                 <tr>
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsExportRoadSelected(row)"
+                                               aria-label="@($"Wegvlak toevoegen aan export: {RoadExportLabel(row)}")"
+                                               @onchange="e => ToggleExportRoad(row, e.Value is true)" />
+                                    </td>
                                     <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
                                     <td>@row.Direction</td>
                                     <td>@row.LengthKm.ToString("N1") km</td>
@@ -701,6 +715,23 @@
                     </table>
                 </div>
             </div>
+        </section>
+
+        <section class="table-panel export-panel">
+            <div class="panel-heading">
+                <div>
+                    <h3>PDF-export</h3>
+                    <span>@SelectedExportCount selectie(s) gekozen</span>
+                </div>
+                <button @onclick="DownloadReportExportAsync" disabled="@(!CanDownloadReportExport)">
+                    @(IsExporting ? "Export maken..." : "PDF-export downloaden")
+                </button>
+            </div>
+            <p class="hint-text">De ZIP bevat een samenvattende PDF, manifest en CSV-bestanden met onderliggende ritregels per aangevinkte stoplocatie of wegvlak.</p>
+            @if (!string.IsNullOrWhiteSpace(ExportStatus))
+            {
+                <p class="export-status @(ExportStatusIsError ? "error" : "ok")">@ExportStatus</p>
+            }
         </section>
 
         <section class="simulation-panel">
@@ -790,6 +821,11 @@
     private int? SelectedDemandDay { get; set; }
     private int? SelectedDemandHour { get; set; }
     private VehicleDemandPopup? DemandPopup { get; set; }
+    private HashSet<string> ExportStopKeys { get; } = new(StringComparer.Ordinal);
+    private HashSet<string> ExportRoadKeys { get; } = new(StringComparer.Ordinal);
+    private bool IsExporting { get; set; }
+    private string? ExportStatus { get; set; }
+    private bool ExportStatusIsError { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
     private string DateFromText { get; set; } = "";
@@ -821,6 +857,8 @@
     private bool ChargerAccessSemiPublic { get; set; } = true;
     private bool ChargerAccessPrivate { get; set; }
     private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
+    private int SelectedExportCount => ExportStopKeys.Count + ExportRoadKeys.Count;
+    private bool CanDownloadReportExport => !IsBusy && !IsExporting && SelectedExportCount > 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -840,17 +878,27 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender) return;
+
+        MapCallbacks = DotNetObjectReference.Create(this);
+        try
         {
-            MapCallbacks = DotNetObjectReference.Create(this);
+            // Map scripts load in <body>; on first interactive render they may not be ready yet.
+            await JS.InvokeVoidAsync("__waitForPlannerMap", 10000);
             await JS.InvokeVoidAsync("routePlannerMap.init", "route-map", MapCallbacks);
             MapReady = true;
             await RefreshMapAsync();
+        }
+        catch (Exception ex)
+        {
+            // Don't kill the circuit if the map fails to initialize — rest of the dashboard must remain usable.
+            Console.Error.WriteLine($"[Home] map init failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
     private async Task ApplyFiltersAsync()
     {
+        ClearExportSelection();
         await LoadDataAsync();
         await RefreshMapAsync();
         await RefreshSelectedDetailAsync();
@@ -868,6 +916,7 @@
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        ClearExportSelection();
         await ClearSelectionHeatAsync();
 
         try
@@ -947,22 +996,37 @@
     private async Task SelectPowerLocationAsync(string locationId)
     {
         var filter = BuildFilter();
-        SelectedPowerProfile = await Analysis.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+        try
         {
-            DateFrom = filter.DateFrom,
-            DateTo = filter.DateTo,
-            VervoerderTypes = filter.VervoerderTypes,
-            Vervoerders = filter.Vervoerders,
-            Wagencodes = filter.Wagencodes,
-            MinDwellMin = filter.MinDwellMin,
-            ZeZoneMode = filter.ZeZoneMode,
-            LocationId = locationId,
-            ScenarioYears = [2027, 2030],
-            ScenarioMode = "linear",
-            CapacityKwh = ScenarioCapacityKwh,
-            MaxVehicleKw = MaxVehicleKw,
-            VehicleClasses = PowerVehicleClasses()
-        });
+            SelectedPowerProfile = await Analysis.GetPowerLocationProfileAsync(new PowerLocationProfileRequest
+            {
+                DateFrom = filter.DateFrom,
+                DateTo = filter.DateTo,
+                VervoerderTypes = filter.VervoerderTypes,
+                Vervoerders = filter.Vervoerders,
+                Wagencodes = filter.Wagencodes,
+                MinDwellMin = filter.MinDwellMin,
+                ZeZoneMode = filter.ZeZoneMode,
+                LocationId = locationId,
+                ScenarioYears = [2027, 2030],
+                ScenarioMode = "linear",
+                CapacityKwh = ScenarioCapacityKwh,
+                MaxVehicleKw = MaxVehicleKw,
+                VehicleClasses = PowerVehicleClasses()
+            });
+        }
+        catch (Exception ex)
+        {
+            // Surface error to caller via popup; don't propagate to circuit handler.
+            SelectedPowerProfile = new PowerLocationProfileResponse(
+                "error",
+                $"{ex.GetType().Name}: {ex.Message}",
+                null,
+                [],
+                [],
+                false);
+            throw;
+        }
     }
 
     private async Task RunSimulationAsync()
@@ -988,6 +1052,34 @@
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private async Task DownloadReportExportAsync()
+    {
+        if (!CanDownloadReportExport)
+        {
+            ExportStatus = "Selecteer minimaal één stoplocatie of wegvlak.";
+            ExportStatusIsError = true;
+            return;
+        }
+
+        IsExporting = true;
+        ExportStatus = "Export wordt opgebouwd...";
+        ExportStatusIsError = false;
+        try
+        {
+            await JS.InvokeVoidAsync("routePlannerExport.download", BuildReportExportRequest());
+            ExportStatus = "Export gedownload.";
+        }
+        catch (JSException ex)
+        {
+            ExportStatus = $"Export mislukt: {ex.Message}";
+            ExportStatusIsError = true;
+        }
+        finally
+        {
+            IsExporting = false;
         }
     }
 
@@ -1089,6 +1181,104 @@
             Plugs = ScenarioPlugs,
             SiteLimitMw = ScenarioSiteLimitMw
         };
+    }
+
+    private ReportExportRequest BuildReportExportRequest()
+    {
+        var filter = BuildFilter();
+        var stopSelections = (Dashboard?.TopStops.Take(12) ?? [])
+            .Where(IsExportStopSelected)
+            .Select(row => new StopLocationExportSelection(row.Lat, row.Lon, StopExportLabel(row), 0.5))
+            .ToArray();
+        var roadSelections = (Dashboard?.TopRoadSegments.Take(12) ?? [])
+            .Where(IsExportRoadSelected)
+            .Select(row => new RoadExportSelection(
+                row.Lat1,
+                row.Lon1,
+                row.Lat2,
+                row.Lon2,
+                row.SelectionRadiusKm,
+                RoadExportLabel(row)))
+            .ToArray();
+
+        return new ReportExportRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            RoadThreshold = filter.RoadThreshold,
+            RoadTopPercent = filter.RoadTopPercent,
+            MarkerTopN = filter.MarkerTopN,
+            ZeZoneMode = filter.ZeZoneMode,
+            Scenario = BuildScenario(),
+            StopSelections = stopSelections,
+            RoadSelections = roadSelections
+        };
+    }
+
+    private void ToggleExportStop(DashboardStop row, bool selected)
+    {
+        ToggleKey(ExportStopKeys, StopExportKey(row), selected);
+        ExportStatus = null;
+    }
+
+    private void ToggleExportRoad(RoadLine row, bool selected)
+    {
+        ToggleKey(ExportRoadKeys, RoadExportKey(row), selected);
+        ExportStatus = null;
+    }
+
+    private bool IsExportStopSelected(DashboardStop row) => ExportStopKeys.Contains(StopExportKey(row));
+
+    private bool IsExportRoadSelected(RoadLine row) => ExportRoadKeys.Contains(RoadExportKey(row));
+
+    private static void ToggleKey(HashSet<string> keys, string key, bool selected)
+    {
+        if (selected)
+        {
+            keys.Add(key);
+        }
+        else
+        {
+            keys.Remove(key);
+        }
+    }
+
+    private void ClearExportSelection()
+    {
+        ExportStopKeys.Clear();
+        ExportRoadKeys.Clear();
+        ExportStatus = null;
+        ExportStatusIsError = false;
+    }
+
+    private static string StopExportKey(DashboardStop row)
+    {
+        return FormattableString.Invariant($"stop:{row.Lat:0.000000}:{row.Lon:0.000000}");
+    }
+
+    private static string RoadExportKey(RoadLine row)
+    {
+        return string.IsNullOrWhiteSpace(row.SegmentId)
+            ? FormattableString.Invariant($"road:{row.Lat1:0.000000}:{row.Lon1:0.000000}:{row.Lat2:0.000000}:{row.Lon2:0.000000}")
+            : row.SegmentId;
+    }
+
+    private static string StopExportLabel(DashboardStop row)
+    {
+        return string.IsNullOrWhiteSpace(row.Name)
+            ? row.Address
+            : row.Name;
+    }
+
+    private static string RoadExportLabel(RoadLine row)
+    {
+        var centerLat = (row.Lat1 + row.Lat2) / 2.0;
+        var centerLon = (row.Lon1 + row.Lon2) / 2.0;
+        return FormattableString.Invariant($"Wegvlak {row.Direction} {centerLat:0.000}, {centerLon:0.000}");
     }
 
     [JSInvokable]
@@ -1298,23 +1488,48 @@
 
     private async Task OpenPowerDemandPopupAsync(PowerLocationProfile profile, PowerHourlyCell cell)
     {
-        await SelectPowerLocationAsync(profile.LocationId);
-        var detailCell = SelectedPowerProfile?.Profile?.HourlyProfile.FirstOrDefault(x => x.Hour == cell.Hour) ?? cell;
-        var titleDate = detailCell.Date is null ? detailCell.Label : $"{detailCell.Date.Value:dd-MM-yyyy} {detailCell.Label}";
-        var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
+        // Open popup immediately with what we already know so user gets feedback,
+        // even if backend is slow or hangs.
+        var initialTitle = cell.Date is null ? cell.Label : $"{cell.Date.Value:dd-MM-yyyy} {cell.Label}";
         DemandPopup = new VehicleDemandPopup(
-            $"{profile.Name} · {titleDate}",
-            $"{detailCell.Vehicles:N0} voertuigen · {FormatPower(detailCell.RequiredKw)} gevraagd · {demandKwh:N0} kWh",
-            detailCell.VehicleDemands
-                .Select(vehicle => new VehicleDemandPopupRow(
-                    vehicle.Wagencode,
-                    vehicle.Kenteken,
-                    vehicle.VehicleClass,
-                    vehicle.DemandKwh,
-                    vehicle.RequiredKw,
-                    vehicle.StandingHours,
-                    vehicle.Window))
-                .ToArray());
+            $"{profile.Name} · {initialTitle}",
+            $"{cell.Vehicles:N0} voertuigen · {FormatPower(cell.RequiredKw)} gevraagd · laden…",
+            []);
+        IsBusy = true;
+        StateHasChanged();
+
+        try
+        {
+            await SelectPowerLocationAsync(profile.LocationId);
+            var detailCell = SelectedPowerProfile?.Profile?.HourlyProfile.FirstOrDefault(x => x.Hour == cell.Hour) ?? cell;
+            var titleDate = detailCell.Date is null ? detailCell.Label : $"{detailCell.Date.Value:dd-MM-yyyy} {detailCell.Label}";
+            var demandKwh = detailCell.VehicleDemands.Sum(x => x.DemandKwh);
+            DemandPopup = new VehicleDemandPopup(
+                $"{profile.Name} · {titleDate}",
+                $"{detailCell.Vehicles:N0} voertuigen · {FormatPower(detailCell.RequiredKw)} gevraagd · {demandKwh:N0} kWh",
+                detailCell.VehicleDemands
+                    .Select(vehicle => new VehicleDemandPopupRow(
+                        vehicle.Wagencode,
+                        vehicle.Kenteken,
+                        vehicle.VehicleClass,
+                        vehicle.DemandKwh,
+                        vehicle.RequiredKw,
+                        vehicle.StandingHours,
+                        vehicle.Window))
+                    .ToArray());
+        }
+        catch (Exception ex)
+        {
+            DemandPopup = new VehicleDemandPopup(
+                $"{profile.Name} · {initialTitle}",
+                $"Kon detail niet laden: {ex.GetType().Name}: {ex.Message}",
+                []);
+        }
+        finally
+        {
+            IsBusy = false;
+            StateHasChanged();
+        }
     }
 
     private void CloseDemandPopup()

@@ -13,6 +13,11 @@ public sealed class RouteAnalysisOptions
     public string? FleetExcelPath { get; init; }
     public VehiclePowerAssumption[] VehiclePowerAssumptions { get; init; } = RouteAnalysisDefaults.VehiclePowerAssumptions;
     public ScenarioInflowAssumption[] ScenarioInflows { get; init; } = RouteAnalysisDefaults.ScenarioInflows;
+    public Models.VehicleEnergyAssumption[] VehicleEnergyAssumptions { get; init; } = RouteAnalysisDefaults.VehicleEnergyAssumptions;
+    public string FleetRolloutMode { get; init; } = "linear";
+    public double FleetRolloutK { get; init; } = 1.1;
+    public int FleetRolloutT0Year { get; init; } = 2029;
+    public string? GeocodingOverridePath { get; init; }
     public string FocusLocationAlias { get; init; } = "Nieuwegein (Groteweerd 80)";
 }
 
@@ -36,7 +41,14 @@ public static class RouteAnalysisOptionsFactory
             ?? RouteAnalysisDefaults.VehiclePowerAssumptions;
         var scenarioInflows = configuration?.GetSection("RouteAnalysis:ScenarioInflows").Get<ScenarioInflowAssumption[]>()
             ?? RouteAnalysisDefaults.ScenarioInflows;
+        var energyAssumptions = configuration?.GetSection("RouteAnalysis:VehicleEnergyAssumptions").Get<Models.VehicleEnergyAssumption[]>()
+            ?? RouteAnalysisDefaults.VehicleEnergyAssumptions;
         var focusLocationAlias = configuration?["RouteAnalysis:FocusLocationAlias"];
+        var fleetRolloutMode = configuration?["RouteAnalysis:FleetRolloutMode"];
+        var fleetRolloutK = configuration?.GetValue<double?>("RouteAnalysis:FleetRolloutK");
+        var fleetRolloutT0 = configuration?.GetValue<int?>("RouteAnalysis:FleetRolloutT0Year");
+        var geocodingOverridePath = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_GEOCODING_OVERRIDE")
+            ?? configuration?["RouteAnalysis:GeocodingOverridePath"];
 
         return new RouteAnalysisOptions
         {
@@ -54,6 +66,11 @@ public static class RouteAnalysisOptionsFactory
                 Path.Combine(cacheDir, "ev_wagenpark_standplaatsen.xlsx")),
             VehiclePowerAssumptions = powerAssumptions.Length == 0 ? RouteAnalysisDefaults.VehiclePowerAssumptions : powerAssumptions,
             ScenarioInflows = scenarioInflows.Length == 0 ? RouteAnalysisDefaults.ScenarioInflows : scenarioInflows,
+            VehicleEnergyAssumptions = energyAssumptions.Length == 0 ? RouteAnalysisDefaults.VehicleEnergyAssumptions : energyAssumptions,
+            FleetRolloutMode = string.IsNullOrWhiteSpace(fleetRolloutMode) ? "linear" : fleetRolloutMode,
+            FleetRolloutK = fleetRolloutK ?? 1.1,
+            FleetRolloutT0Year = fleetRolloutT0 ?? 2029,
+            GeocodingOverridePath = FirstExistingFile(geocodingOverridePath, Path.Combine(repoRoot, "data", "fleet_geocoded.csv")),
             FocusLocationAlias = string.IsNullOrWhiteSpace(focusLocationAlias) ? "Nieuwegein (Groteweerd 80)" : focusLocationAlias,
         };
     }
@@ -89,5 +106,15 @@ public static class RouteAnalysisDefaults
         new(2029, 38, 25),
         new(2030, 56, 25),
         new(2031, 75, 25),
+    ];
+
+    public static Models.VehicleEnergyAssumption[] VehicleEnergyAssumptions { get; } =
+    [
+        new("trekker", "winter", 1.60),
+        new("trekker", "summer", 1.30),
+        new("bakwagen", "winter", 1.00),
+        new("bakwagen", "summer", 0.85),
+        new("unknown", "winter", 1.30),
+        new("unknown", "summer", 1.10),
     ];
 }

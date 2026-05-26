@@ -28,4 +28,25 @@
 - Vermogensvraag: elke truck vraagt standaard 590 kWh op de locatie, gedeeld door de stilstanduren. De 590 kWh komt uit de linker paneelparameter `Batterijcapaciteit (kWh)`.
 - Cut-off tijden en gewicht/ladingprofielen zijn niet meegenomen.
 - Fleet Excel-match is diagnostisch; de primaire `own`/`charter` classificatie blijft gebaseerd op ritdata omdat die voor alle route-acties aanwezig is.
+
+## 6. Review door data-scientist / wiskundige (2026-05-25)
+- **Site-cap + anomaly_flag**: aggregate vermogen per uur per site nu hard begrensd op `SiteLimitMw` (default 1.4 MW); overschrijdingen worden gemarkeerd via `anomaly_flag` kolom in alle CSV-exports en doorgepropageerd naar `PowerHourlyCell`, `PowerDailyMetric`, `PowerHeatmapCell`, scenario-cellen.
+- **Minimum dwell**: default `MinDwellMin` opgehoogd van 0 naar 15 minuten; voorkomt division-by-small-number explosies bij korte dwell-tijden.
+- **DataQualityReport**: nieuwe endpoint `GET /api/data-quality` met null-rates, time-inversions, dubbele trip-ids, negative/zero distances, implausible speed (>120 km/h), long-dwell outliers. Telt absolute aantallen en percentages per regel.
+- **kWh/km per klasse + seizoen**: `RouteAnalysisDefaults.VehicleEnergyAssumptions` differentieert nu trekker (winter 1.60, summer 1.30), bakwagen (winter 1.00, summer 0.85), unknown (winter 1.30, summer 1.10). Helper `ResolveKwhPerKm(class, date)` beschikbaar voor consumers; SQL-pipeline override is follow-up.
+- **Sidecar meta.json**: elke CSV/Parquet export in `out/nieuwegein/` krijgt nu een `<name>.meta.json` met run-parameters, SHA256, software-versie, generated_at, energy assumptions en scenario inflows. Auditbaar voor reviewers.
+- **Sensitivity sweep**: nieuwe endpoint `POST /api/power/sensitivity` met sweep over {energy 0.85-1.60, SoC bands, fleet low/base/high} en P10/P50/P90 voor peak_mw en shortage_mwh.
+- **Property-based tests**: nieuwe `PhysicsConstraintsTests` met o.a. `PowerProfileNeverExceedsSiteLimit`, `ShortageMwhIsNeverNegative`, `ScenarioPercolatesNoPhysicallyImpossibleValues`, `DataQualityReportReturnsKnownIssueCodes`.
+- **Coordinaten-precisie**: location_id format `auto:%.3f:%.3f` → `auto:%.4f:%.4f` (~11 m i.p.v. ~111 m); voorkomt dat twee depots binnen 100 m onder één auto-cluster ID vallen.
+- **S-curve fleet rollout**: `RouteAnalysisOptions.FleetRolloutMode = "scurve"` activeert logistische groei (`L/(1+e^(-k(t-t0)))`) ipv lineair; parameters `FleetRolloutK` (default 1.1) en `FleetRolloutT0Year` (default 2029).
+- **Fleet-match endpoint**: `GET /api/fleet/match` geeft per voertuig in trip-data of het in fleet-Excel zit; lijst van "unknown" voertuigen voor handmatige review.
+- **Geocoding override**: optioneel `data/fleet_geocoded.csv` of `ROUTE_ANALYSIS_GEOCODING_OVERRIDE` env var; overschrijft Nominatim resultaten met handmatig geverifieerde coordinaten. Template: `scripts/fleet_geocoded_template.csv`.
+- **Corridor hotspots**: nieuwe endpoint `POST /api/corridors/hotspots` alloceert corridor-shortage MWh aan top-N drukste wegsegmenten via grid-bucketed (`mid_lat,mid_lon` op 0.01° ≈ 1.1 km) Voronoi-achtige clustering.
+- **Backtest gap**: tool's `1.2 kWh/km` is **niet** gevalideerd tegen reëel meterverbruik. Template `scripts/backtest_template.csv` toegevoegd voor PostNL pilot-data; MAPE-berekening volgt zodra meterdata beschikbaar is.
+
+## 7. SoC-bewuste vermogensberekening + foutbanner observability (2026-05-26)
+- **Front-loaded laadcurve**: vervangen van naive `capacity / standingHours` formule door fysisch realistisch model. Per voertuig: `demand_kwh = min(distance × kWh/km, capacity × (target-min)/100)`; vermogen = `MaxVehicleKw` zolang energie nog niet vol is, daarna 0. Voor 12 km rit met 400 kW lader: 14 kW in eerste uur, 0 kW daarna — i.p.v. 182 kW gespreid over 4 uur. Tests (`OriginalCsvWaitAndPauseActionsProduceHourlyPowerProfiles`) bijgewerkt naar realistische waardes.
+- **PowerProfileRequest**: nieuwe parameters `KwhPerKm` (default 1.2), `MinSocPct` (15), `TargetSocPct` (80) met clamping in `NormalizePowerRequest`. Zichtbaar in API responses en aanstuurbaar via UI-input (vervolgwerk: UI-knoppen toevoegen).
+- **Property test**: `ChargingEnergyPerVehicleNeverExceedsUsableSoc` en `FrontLoadedAllocationProducesZeroPowerAfterChargeCompletes` toegevoegd.
+- **Foutbanner observability**: `CircuitOptions.DetailedErrors = true` standaard aan (toggle via `ROUTE_ANALYSIS_DETAILED_ERRORS=false`). Nieuwe in-memory `RecentExceptionBuffer` met laatste 50 warnings/errors via ILoggerProvider. Endpoint `GET /api/debug/recent-errors` toont JSON met stack traces. MainLayout error-banner heeft nu "Details"-link die naar dat endpoint linkt.
 - De 2026 instroom is omgerekend naar 3 trekker-equivalenten omdat 6 trekkers pas in september instromen.

@@ -13,6 +13,24 @@
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="InteractiveServer" />
+    <script>
+      // Helper used by Blazor OnAfterRender: wait until the map scripts (defer-loaded in body)
+      // have finished initializing window.routePlannerMap and window.maplibregl.
+      window.__waitForPlannerMap = (timeoutMs) => new Promise((resolve, reject) => {
+        const limit = typeof timeoutMs === "number" ? timeoutMs : 8000;
+        const start = Date.now();
+        const tick = () => {
+          if (window.routePlannerMap && window.maplibregl) { resolve(); return; }
+          if (Date.now() - start > limit) {
+            reject(new Error(
+              `Map JS not loaded after ${limit}ms (routePlannerMap=${typeof window.routePlannerMap}, maplibregl=${typeof window.maplibregl})`));
+            return;
+          }
+          setTimeout(tick, 80);
+        };
+        tick();
+      });
+    </script>
 </head>
 
 <body>

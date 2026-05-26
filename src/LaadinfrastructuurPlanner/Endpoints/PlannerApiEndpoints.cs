@@ -52,6 +52,12 @@ public static class PlannerApiEndpoints
         api.MapPost("/power/export/nieuwegein", (RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.ExportNieuwegeinPowerReportAsync(cancellationToken));
 
+        api.MapGet("/data-quality", (RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetDataQualityReportAsync(cancellationToken));
+
+        api.MapPost("/power/sensitivity", ([FromBody] PowerLocationProfileRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetSensitivityAsync(request, cancellationToken));
+
         api.MapPost("/dashboard", ([FromBody] AnalysisFilter filter, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetDashboardAsync(filter, cancellationToken));
 
@@ -60,6 +66,14 @@ public static class PlannerApiEndpoints
 
         api.MapGet("/fleet/standplaatsen", (FleetDataService fleet, CancellationToken cancellationToken) =>
             fleet.GetDepotsAsync(cancellationToken));
+
+        api.MapGet("/fleet/match", (RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetFleetMatchReportAsync(cancellationToken));
+
+        api.MapPost("/corridors/hotspots", ([FromBody] AnalysisFilter filter, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetCorridorHotspotsAsync(filter, null, 25, cancellationToken));
+
+        api.MapGet("/debug/recent-errors", (RecentExceptionBuffer buffer) => buffer.Snapshot());
 
         return endpoints;
     }
