@@ -184,6 +184,121 @@
             <div class="metric"><span>Stopduur (uur)</span><strong>@FormatNumber(Summary?.TotalDwellHours)</strong></div>
         </section>
 
+        <section class="map-panel">
+            <div class="panel-heading">
+                <h3>Kaart</h3>
+                <span id="map-status">Klaar</span>
+            </div>
+            <div class="map-frame">
+                <div id="route-map" class="route-map"></div>
+                <aside class="map-legend @(LegendCollapsed ? "is-collapsed" : "")" aria-label="Legenda kaartlagen">
+                    <div class="legend-heading">
+                        <strong>Legenda</strong>
+                        @if (!LegendCollapsed)
+                        {
+                            <span>Actieve lagen</span>
+                        }
+                        <button type="button"
+                                class="legend-toggle"
+                                title="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
+                                aria-label="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
+                                @onclick="() => LegendCollapsed = !LegendCollapsed">
+                            @(LegendCollapsed ? "+" : "-")
+                        </button>
+                    </div>
+
+                    @if (!LegendCollapsed && ShowStopHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient stop-gradient"></span>
+                            <div>
+                                <strong>Stopdrukte</strong>
+                                <span>Blauw naar rood: van beperkte naar zeer hoge stopdrukte.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowMarkers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol stop-marker"></span>
+                            <div>
+                                <strong>Toplocaties</strong>
+                                <span>Blauwe rondjes met witte rand; groter betekent meer voertuigen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowChargers)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol charger-marker"></span>
+                            <div>
+                                <strong>Laadlocaties</strong>
+                                <span>Groene rondjes met witte rand; groter betekent hoger vermogen.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowOvernight)
+                    {
+                        <div class="legend-item split">
+                            <span class="legend-symbol overnight-ok"></span>
+                            <span class="legend-symbol overnight-shortage"></span>
+                            <div>
+                                <strong>Vaste stilstandlocaties</strong>
+                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowStandplaatsen)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol standplaats-marker"></span>
+                            <div>
+                                <strong>Standplaatsen (wagenpark)</strong>
+                                <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowRoads)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-line road-line"></span>
+                            <div>
+                                <strong>Wegvlakken</strong>
+                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowRoadHeat)
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient road-gradient"></span>
+                            <div>
+                                <strong>Wegdrukte</strong>
+                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && SelectedDetail?.SelectionType == "stop")
+                    {
+                        <div class="legend-item heat">
+                            <span class="legend-gradient selection-gradient"></span>
+                            <div>
+                                <strong>Vertrekroutes</strong>
+                                <span>Groen naar rood: routes vanaf de gekozen stoplocatie na een vaste stilstandperiode.</span>
+                            </div>
+                        </div>
+                    }
+                </aside>
+            </div>
+        </section>
+
         @if (PowerProfiles is not null)
         {
             <section class="table-panel power-profile-panel">
@@ -376,121 +491,6 @@
                 <p>Er zijn geen ZE-zone stops binnen de huidige filters.</p>
             </section>
         }
-
-        <section class="map-panel">
-            <div class="panel-heading">
-                <h3>Kaart</h3>
-                <span id="map-status">Klaar</span>
-            </div>
-            <div class="map-frame">
-                <div id="route-map" class="route-map"></div>
-                <aside class="map-legend @(LegendCollapsed ? "is-collapsed" : "")" aria-label="Legenda kaartlagen">
-                    <div class="legend-heading">
-                        <strong>Legenda</strong>
-                        @if (!LegendCollapsed)
-                        {
-                            <span>Actieve lagen</span>
-                        }
-                        <button type="button"
-                                class="legend-toggle"
-                                title="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
-                                aria-label="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
-                                @onclick="() => LegendCollapsed = !LegendCollapsed">
-                            @(LegendCollapsed ? "+" : "-")
-                        </button>
-                    </div>
-
-                    @if (!LegendCollapsed && ShowStopHeat)
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient stop-gradient"></span>
-                            <div>
-                                <strong>Stopdrukte</strong>
-                                <span>Blauw naar rood: van beperkte naar zeer hoge stopdrukte.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowMarkers)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol stop-marker"></span>
-                            <div>
-                                <strong>Toplocaties</strong>
-                                <span>Blauwe rondjes met witte rand; groter betekent meer voertuigen.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowChargers)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol charger-marker"></span>
-                            <div>
-                                <strong>Laadlocaties</strong>
-                                <span>Groene rondjes met witte rand; groter betekent hoger vermogen.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowOvernight)
-                    {
-                        <div class="legend-item split">
-                            <span class="legend-symbol overnight-ok"></span>
-                            <span class="legend-symbol overnight-shortage"></span>
-                            <div>
-                                <strong>Vaste stilstandlocaties</strong>
-                                <span>Geel: lokaal laden lijkt voldoende. Rood: verwacht laadtekort.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowStandplaatsen)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-symbol standplaats-marker"></span>
-                            <div>
-                                <strong>Standplaatsen (wagenpark)</strong>
-                                <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowRoads)
-                    {
-                        <div class="legend-item">
-                            <span class="legend-line road-line"></span>
-                            <div>
-                                <strong>Wegvlakken</strong>
-                                <span>Klikbare paarse lijnen. Filter gebruikt minimale passages; samengevoegd per rijrichting.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && ShowRoadHeat)
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient road-gradient"></span>
-                            <div>
-                                <strong>Wegdrukte</strong>
-                                <span>Niet klikbare heatmap. Zelfde passagedrempel, maar als vloeiende concentratiekaart.</span>
-                            </div>
-                        </div>
-                    }
-
-                    @if (!LegendCollapsed && SelectedDetail?.SelectionType == "stop")
-                    {
-                        <div class="legend-item heat">
-                            <span class="legend-gradient selection-gradient"></span>
-                            <div>
-                                <strong>Vertrekroutes</strong>
-                                <span>Groen naar rood: routes vanaf de gekozen stoplocatie na een vaste stilstandperiode.</span>
-                            </div>
-                        </div>
-                    }
-                </aside>
-            </div>
-        </section>
 
         @if (SelectedDetail is not null)
         {
