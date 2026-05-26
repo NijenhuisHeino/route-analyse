@@ -159,12 +159,23 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         var dedicated = await _service.GetChargersAsync(new ChargerFilter
         {
             MinPowerKw = 400,
+            MinConnectors = 4,
             OnlyDedicated = true,
             Access = ["Privaat"],
         });
 
         Assert.Single(dedicated.Markers);
         Assert.Equal("Dedicated Depot", dedicated.Markers[0].Name);
+
+        var tooFewConnectors = await _service.GetChargersAsync(new ChargerFilter
+        {
+            MinPowerKw = 400,
+            MinConnectors = 5,
+            OnlyDedicated = true,
+            Access = ["Privaat"],
+        });
+
+        Assert.Empty(tooFewConnectors.Markers);
     }
 
     [Fact]

@@ -369,7 +369,7 @@ public sealed partial class RouteAnalysisService
     {
         static string Values(IEnumerable<string> values) => string.Join(", ", values.DefaultIfEmpty("alle"));
         var period = $"{request.DateFrom?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "start"} t/m {request.DateTo?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "eind"}";
-        return $"Periode: {period} | Vervoersvorm: {Values(request.VervoerderTypes)} | Vervoerders: {Values(request.Vervoerders)} | Voertuigen: {Values(request.Wagencodes)} | Min. stopduur: {request.MinDwellMin:N0} min | ZE-zone: {request.ZeZoneMode} | Scenario: {request.Scenario.KwhPerKm:N1} kWh/km, {request.Scenario.CapacityKwh:N0} kWh, {request.Scenario.KwPerPlug:N0} kW/stekker, {request.Scenario.Plugs:N0} stekkers";
+        return $"Periode: {period} | Vervoersvorm: {Values(request.VervoerderTypes)} | Vervoerders: {Values(request.Vervoerders)} | Voertuigen: {Values(request.Wagencodes)} | Min. stopduur: {request.MinDwellMin:N0} min | ZE-zone: {request.ZeZoneMode} | Voertuig: {request.Scenario.KwhPerKm:N1} kWh/km, {request.Scenario.CapacityKwh:N0} kWh, doel {request.Scenario.TargetSocPct:N0}%";
     }
 
     private static string TopWindowsText(IReadOnlyList<ChargingWindow> windows)

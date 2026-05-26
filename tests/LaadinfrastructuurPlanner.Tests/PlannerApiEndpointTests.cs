@@ -64,7 +64,7 @@ public sealed class PlannerApiEndpointTests : IDisposable
         Assert.Equal("ok", roads.Status);
         Assert.NotEmpty(roads.Lines);
 
-        var chargers = await PostAsync<ChargerMapResponse>(client, "/api/map/chargers", new ChargerFilter { MinPowerKw = 150 });
+        var chargers = await PostAsync<ChargerMapResponse>(client, "/api/map/chargers", new ChargerFilter { MinPowerKw = 150, MinConnectors = 4 });
         Assert.Equal("ok", chargers.Status);
         Assert.NotEmpty(chargers.Markers);
 

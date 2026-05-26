@@ -82,43 +82,41 @@
             }
         </section>
 
-        <section class="filter-grid demand-controls">
+        <section class="filter-grid depot-controls">
+            <h3 class="control-heading">Depotselectie</h3>
             <label>
                 Min. voertuigen per depot
                 <input type="number" min="1" max="100" step="1" @bind="MinDepotVehicles" />
             </label>
+        </section>
+
+        <section class="filter-grid demand-controls">
+            <h3 class="control-heading">Voertuig</h3>
             <label>
                 kWh/km
-                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" />
+                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" @bind:after="RefreshPowerProfilesAsync" />
             </label>
             <label>
                 Batterijcapaciteit (kWh)
                 <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" @bind:after="RefreshPowerProfilesAsync" />
             </label>
-            <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" @bind:after="RefreshPowerProfilesAsync" /> MCS laden toestaan</label>
-            <span class="range-value">Max. afname per truck: @MaxVehicleKw.ToString("N0") kW</span>
             <label>
                 Doel laadniveau (%)
-                <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" />
+                <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" @bind:after="RefreshPowerProfilesAsync" />
             </label>
-            <label>
-                Vermogen per stekker (kW)
-                <input type="number" min="50" max="2000" step="50" @bind="ScenarioKwPerPlug" />
-            </label>
-            <label>
-                Stekkers
-                <input type="number" min="1" max="100" step="1" @bind="ScenarioPlugs" />
-            </label>
-            <label>
-                Locatielimiet (MW)
-                <input type="number" min="0.05" max="50" step="0.1" @bind="ScenarioSiteLimitMw" />
-            </label>
+            <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" @bind:after="RefreshPowerProfilesAsync" /> MCS laden toestaan</label>
+            <span class="range-value">Max. afname per truck: @MaxVehicleKw.ToString("N0") kW</span>
         </section>
 
         <section class="filter-grid charger-controls">
+            <h3 class="control-heading">Vereist een publieke laadlocatie</h3>
             <label>
-                Min. vermogen (kW)
-                <input type="number" min="0" max="400" step="50" @bind="ChargerMinPowerKw" @bind:after="RefreshMapAsync" />
+                Vermogen per stekker (kW)
+                <input type="number" min="0" max="1000" step="50" @bind="ChargerMinPowerKw" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
+                Min. aantal stekkers
+                <input type="number" min="1" max="100" step="1" @bind="ChargerMinConnectors" @bind:after="RefreshMapAsync" />
             </label>
             <label class="toggle"><input type="checkbox" @bind="ChargerOnlyDedicated" @bind:after="RefreshMapAsync" /> Alleen gereserveerd</label>
             <label class="toggle"><input type="checkbox" @bind="ChargerAccessPublic" @bind:after="RefreshMapAsync" /> Publiek</label>
@@ -307,7 +305,26 @@
                         <h3>24-uurs vermogensprofiel</h3>
                         <span>@PowerTransportLabel · klik op een cel voor voertuigen</span>
                     </div>
-                    <button @onclick="RefreshPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
+                    <div class="power-controls">
+                        <label class="power-control-inline">
+                            <span>Aantal</span>
+                            <input type="number" min="1" max="200" step="5" @bind="PowerTopLocations" @bind:after="RefreshPowerProfilesAsync" />
+                        </label>
+                        <label class="power-control-inline">
+                            <span>Sorteer op</span>
+                            <select @bind="PowerSortBy" @bind:after="RefreshPowerProfilesAsync">
+                                <option value="peak">Piek vermogen</option>
+                                <option value="vehicles">Unieke voertuigen</option>
+                                <option value="events">Aantal events</option>
+                                <option value="name">Naam (A-Z)</option>
+                            </select>
+                        </label>
+                        <label class="power-control-inline">
+                            <span>Zoek</span>
+                            <input type="text" placeholder="naam of adres" @bind="PowerLocationSearch" @bind:after="RefreshPowerProfilesAsync" />
+                        </label>
+                        <button @onclick="RefreshPowerProfilesAsync" disabled="@IsBusy">Profiel bijwerken</button>
+                    </div>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(PowerProfiles.Message))
                 {
@@ -325,7 +342,7 @@
                         {
                             <span class="power-hour-label">@($"{hour:00}")</span>
                         }
-                        @foreach (var profile in PowerProfiles.Locations.Take(5))
+                        @foreach (var profile in PowerProfiles.Locations)
                         {
                             <button class="power-location-label" title="@profile.Address" @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
                                 @(string.IsNullOrWhiteSpace(profile.Name) ? profile.Address : profile.Name)
@@ -342,7 +359,7 @@
                         }
                     </div>
                     <div class="power-profile-summary">
-                        @foreach (var profile in PowerProfiles.Locations.Take(5))
+                        @foreach (var profile in PowerProfiles.Locations)
                         {
                             <button class="power-summary-row" @onclick="() => SelectPowerLocationAsync(profile.LocationId)">
                                 <strong>@(string.IsNullOrWhiteSpace(profile.Name) ? profile.Address : profile.Name)</strong>
@@ -828,6 +845,9 @@
     private bool ExportStatusIsError { get; set; }
 
     private string TransportMode { get; set; } = "Alles";
+    private int PowerTopLocations { get; set; } = 5;
+    private string PowerSortBy { get; set; } = "peak";
+    private string PowerLocationSearch { get; set; } = "";
     private string DateFromText { get; set; } = "";
     private string DateToText { get; set; } = "";
     private string VervoerdersText { get; set; } = "";
@@ -847,11 +867,9 @@
     private double ScenarioKwhPerKm { get; set; } = 1.2;
     private double ScenarioCapacityKwh { get; set; } = 590;
     private bool ScenarioMcsEnabled { get; set; }
-    private double ScenarioTargetSocPct { get; set; } = 80;
-    private double ScenarioKwPerPlug { get; set; } = 350;
-    private int ScenarioPlugs { get; set; } = 4;
-    private double ScenarioSiteLimitMw { get; set; } = 1.4;
-    private double ChargerMinPowerKw { get; set; } = 150;
+    private double ScenarioTargetSocPct { get; set; } = 100;
+    private double ChargerMinPowerKw { get; set; } = 350;
+    private int ChargerMinConnectors { get; set; } = 1;
     private bool ChargerOnlyDedicated { get; set; }
     private bool ChargerAccessPublic { get; set; } = true;
     private bool ChargerAccessSemiPublic { get; set; } = true;
@@ -963,12 +981,16 @@
             Wagencodes = filter.Wagencodes,
             MinDwellMin = filter.MinDwellMin,
             ZeZoneMode = filter.ZeZoneMode,
-            TopLocations = 5,
+            TopLocations = PowerTopLocations,
             ScenarioYears = [2027, 2030],
             ScenarioMode = "linear",
             CapacityKwh = ScenarioCapacityKwh,
+            KwhPerKm = ScenarioKwhPerKm,
+            TargetSocPct = ScenarioTargetSocPct,
             MaxVehicleKw = MaxVehicleKw,
-            VehicleClasses = PowerVehicleClasses()
+            VehicleClasses = PowerVehicleClasses(),
+            SortBy = PowerSortBy,
+            LocationSearch = PowerLocationSearch
         });
         PowerDiagnostics = await Analysis.GetPowerDiagnosticsAsync(filter);
     }
@@ -1011,6 +1033,8 @@
                 ScenarioYears = [2027, 2030],
                 ScenarioMode = "linear",
                 CapacityKwh = ScenarioCapacityKwh,
+                KwhPerKm = ScenarioKwhPerKm,
+                TargetSocPct = ScenarioTargetSocPct,
                 MaxVehicleKw = MaxVehicleKw,
                 VehicleClasses = PowerVehicleClasses()
             });
@@ -1145,6 +1169,7 @@
         return new ChargerFilter
         {
             MinPowerKw = ChargerMinPowerKw,
+            MinConnectors = ChargerMinConnectors,
             OnlyDedicated = ChargerOnlyDedicated,
             Access = access.ToArray(),
         };
@@ -1177,9 +1202,9 @@
             CapacityKwh = ScenarioCapacityKwh,
             MinSocPct = 15,
             TargetSocPct = ScenarioTargetSocPct,
-            KwPerPlug = ScenarioKwPerPlug,
-            Plugs = ScenarioPlugs,
-            SiteLimitMw = ScenarioSiteLimitMw
+            KwPerPlug = 2_000,
+            Plugs = 100,
+            SiteLimitMw = 50
         };
     }
 

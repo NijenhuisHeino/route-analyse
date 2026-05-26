@@ -596,6 +596,7 @@ public sealed partial class RouteAnalysisService
         return filter with
         {
             MinPowerKw = Math.Clamp(filter.MinPowerKw, 0, 1_000),
+            MinConnectors = Math.Clamp(filter.MinConnectors <= 0 ? 1 : filter.MinConnectors, 1, 1_000),
             Access = NormalizeArray(filter.Access),
         };
     }
@@ -1067,6 +1068,7 @@ public sealed partial class RouteAnalysisService
             "lat IS NOT NULL",
             "lon IS NOT NULL",
             $"COALESCE(CAST(max_power_kw AS DOUBLE), 0) >= {filter.MinPowerKw.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            $"COALESCE(CAST(n_connectors AS BIGINT), 0) >= {filter.MinConnectors.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
         };
 
         if (filter.OnlyDedicated)

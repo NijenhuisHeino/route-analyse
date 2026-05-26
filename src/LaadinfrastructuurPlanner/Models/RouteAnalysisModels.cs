@@ -25,7 +25,8 @@ public sealed record SimulationRequest : AnalysisFilter
 
 public sealed record ChargerFilter
 {
-    public double MinPowerKw { get; init; } = 150;
+    public double MinPowerKw { get; init; } = 350;
+    public int MinConnectors { get; init; } = 1;
     public bool OnlyDedicated { get; init; }
     public string[] Access { get; init; } = ["Publiek", "Semi-publiek"];
 }
@@ -138,10 +139,10 @@ public sealed record ChargingScenario
     public double KwhPerKm { get; init; } = 1.2;
     public double CapacityKwh { get; init; } = 590;
     public double MinSocPct { get; init; } = 15;
-    public double TargetSocPct { get; init; } = 80;
-    public double KwPerPlug { get; init; } = 350;
-    public int Plugs { get; init; } = 4;
-    public double SiteLimitMw { get; init; } = 1.4;
+    public double TargetSocPct { get; init; } = 100;
+    public double KwPerPlug { get; init; } = 2_000;
+    public int Plugs { get; init; } = 100;
+    public double SiteLimitMw { get; init; } = 50;
 }
 
 public sealed record OvernightLocationsRequest : AnalysisFilter
@@ -296,10 +297,13 @@ public record PowerProfileRequest : AnalysisFilter
     public string ScenarioMode { get; init; } = "linear";
     public double CapacityKwh { get; init; } = 590;
     public double MaxVehicleKw { get; init; } = 400;
-    public double SiteLimitMw { get; init; } = 1.4;
+    public double SiteLimitMw { get; init; } = 50;
     public double KwhPerKm { get; init; } = 1.2;
     public double MinSocPct { get; init; } = 15;
-    public double TargetSocPct { get; init; } = 80;
+    public double TargetSocPct { get; init; } = 100;
+    // Selectie- en sortering controle voor de heatmap.
+    public string SortBy { get; init; } = "peak";  // peak | vehicles | events | name
+    public string LocationSearch { get; init; } = "";
 }
 
 public sealed record PowerLocationProfileRequest : PowerProfileRequest

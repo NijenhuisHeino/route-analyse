@@ -143,6 +143,14 @@ td span,
   gap: 10px;
 }
 
+.control-heading {
+  margin: 0 0 2px;
+  color: var(--eta-text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .filter-grid input,
 .filter-grid select {
   width: 100%;
@@ -1260,6 +1268,37 @@ td span {
   outline-offset: -2px;
   background: rgba(217, 46, 46, var(--power-alpha, 0.4));
   color: #5a0d0d;
+}
+
+.power-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.power-control-inline {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--eta-purple);
+}
+
+.power-control-inline input,
+.power-control-inline select {
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--eta-border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 90px;
+}
+
+.power-control-inline input[type="number"] {
+  width: 80px;
 }
 
 .power-profile-summary {

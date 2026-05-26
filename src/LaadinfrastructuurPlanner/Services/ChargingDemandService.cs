@@ -991,9 +991,9 @@ public sealed partial class RouteAnalysisService
             CapacityKwh = Math.Clamp(scenario.CapacityKwh, 100, 1_500),
             MinSocPct = Math.Clamp(scenario.MinSocPct, 0, 50),
             TargetSocPct = Math.Clamp(Math.Max(scenario.TargetSocPct, scenario.MinSocPct + 1), 20, 100),
-            KwPerPlug = Math.Clamp(scenario.KwPerPlug, 50, 2_000),
-            Plugs = Math.Clamp(scenario.Plugs, 1, 100),
-            SiteLimitMw = Math.Clamp(scenario.SiteLimitMw, 0.05, 50),
+            KwPerPlug = Math.Clamp(scenario.KwPerPlug <= 0 ? 2_000 : scenario.KwPerPlug, 50, 2_000),
+            Plugs = Math.Clamp(scenario.Plugs <= 0 ? 100 : scenario.Plugs, 1, 100),
+            SiteLimitMw = Math.Clamp(scenario.SiteLimitMw <= 0 ? 50 : scenario.SiteLimitMw, 0.05, 50),
         };
     }
 

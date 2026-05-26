@@ -26,10 +26,9 @@ public sealed partial class RouteAnalysisService
         {
             using var connection = OpenConnection();
             var events = MergeOverlappingPresenceWindows(ToPresenceWindows(await QueryPowerEventsAsync(connection, BuildPowerWhere(normalized, onlyChargeWindows: false), cancellationToken)));
-            var profiles = BuildLocationProfiles(events, normalized, includeVehicleDemands: false)
-                .OrderByDescending(x => x.PeakKw)
-                .ThenByDescending(x => x.UniqueVehicles)
-                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            var allProfiles = BuildLocationProfiles(events, normalized, includeVehicleDemands: false);
+            var filteredProfiles = ApplyLocationSearch(allProfiles, normalized.LocationSearch);
+            var profiles = SortPowerProfiles(filteredProfiles, normalized.SortBy)
                 .Take(normalized.TopLocations)
                 .ToArray();
             var selectedIds = profiles.Select(x => x.LocationId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -229,7 +228,7 @@ public sealed partial class RouteAnalysisService
             FocusAddress: selected.Address,
             CapacityKwh: 590,
             MaxVehicleKw: 400,
-            SiteLimitMw: 1.4,
+            SiteLimitMw: 50,
             ScenarioYears: [2027, 2030],
             VehicleClasses: ["own"],
             EnergyAssumptions: _store.Options.VehicleEnergyAssumptions,
@@ -662,7 +661,7 @@ public sealed partial class RouteAnalysisService
             MarkerTopN = normalized.MarkerTopN,
             ZeZoneMode = normalized.ZeZoneMode,
             VehicleClasses = NormalizeVehicleClasses(request.VehicleClasses),
-            TopLocations = Math.Clamp(request.TopLocations, 1, 50),
+            TopLocations = Math.Clamp(request.TopLocations, 1, 200),
             ScenarioYears = (request.ScenarioYears.Length == 0 ? [2027, 2030] : request.ScenarioYears)
                 .Where(year => year >= 2026 && year <= 2040)
                 .Distinct()
@@ -671,10 +670,53 @@ public sealed partial class RouteAnalysisService
             ScenarioMode = NormalizeScenarioMode(request.ScenarioMode),
             CapacityKwh = Math.Clamp(request.CapacityKwh, 100, 1_500),
             MaxVehicleKw = Math.Clamp(request.MaxVehicleKw <= 0 ? 400 : request.MaxVehicleKw, 50, 1_500),
-            SiteLimitMw = Math.Clamp(request.SiteLimitMw <= 0 ? 1.4 : request.SiteLimitMw, 0.05, 50),
+            SiteLimitMw = Math.Clamp(request.SiteLimitMw <= 0 ? 50 : request.SiteLimitMw, 0.05, 50),
             KwhPerKm = Math.Clamp(request.KwhPerKm <= 0 ? 1.2 : request.KwhPerKm, 0.3, 3.5),
             MinSocPct = Math.Clamp(request.MinSocPct, 0, 50),
             TargetSocPct = Math.Clamp(Math.Max(request.TargetSocPct, request.MinSocPct + 1), 20, 100),
+            SortBy = NormalizeSortBy(request.SortBy),
+            LocationSearch = (request.LocationSearch ?? "").Trim(),
+        };
+    }
+
+    private static string NormalizeSortBy(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "vehicles" => "vehicles",
+            "events" => "events",
+            "name" => "name",
+            _ => "peak",
+        };
+    }
+
+    private static IEnumerable<PowerLocationProfile> ApplyLocationSearch(IEnumerable<PowerLocationProfile> profiles, string search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return profiles;
+        return profiles.Where(p =>
+            (p.Name?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (p.Address?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    private static IEnumerable<PowerLocationProfile> SortPowerProfiles(IEnumerable<PowerLocationProfile> profiles, string sortBy)
+    {
+        return sortBy switch
+        {
+            "vehicles" => profiles
+                .OrderByDescending(x => x.UniqueVehicles)
+                .ThenByDescending(x => x.PeakKw)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase),
+            "events" => profiles
+                .OrderByDescending(x => x.Events)
+                .ThenByDescending(x => x.UniqueVehicles)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase),
+            "name" => profiles
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(x => x.PeakKw),
+            _ => profiles
+                .OrderByDescending(x => x.PeakKw)
+                .ThenByDescending(x => x.UniqueVehicles)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase),
         };
     }
 
@@ -703,6 +745,8 @@ public sealed partial class RouteAnalysisService
             KwhPerKm = normalized.KwhPerKm,
             MinSocPct = normalized.MinSocPct,
             TargetSocPct = normalized.TargetSocPct,
+            SortBy = normalized.SortBy,
+            LocationSearch = normalized.LocationSearch,
             LocationId = request.LocationId.Trim(),
         };
     }
@@ -759,7 +803,7 @@ public sealed partial class RouteAnalysisService
             "Smart/spreidende laadcurve: vermogen = min(MaxVehicleKw, capacity ÷ stilstanduren). Voorbeeld: 590 kWh over 8 uur stilstand = 74 kW gespreid. Over 1 uur = 400 kW (cap).",
             "Default batterijcapaciteit: 590 kWh, instelbaar via de Batterijcapaciteit-input.",
             "Default voertuigacceptatie: 400 kW per truck; MCS-selectie verhoogt dit naar 1.500 kW.",
-            "Site-limit (SiteLimitMw, default 1.4 MW): planning-constraint. Cellen tonen de werkelijke vraag; cellen boven de cap krijgen anomaly_flag = true en zijn visueel gemarkeerd.",
+            "Site-limit (SiteLimitMw, default 50 MW): planning-constraint. Cellen tonen de werkelijke vraag; cellen boven de cap krijgen anomaly_flag = true en zijn visueel gemarkeerd.",
         };
         assumptions.Add("Laadvensters: wait_task_available, wait_after, wait_action, pause.");
         assumptions.Add("Instroom Madeleine: 2026=3 trekkers/1 bakwagen; 2027=10/16; 2028=21/25; 2029=38/25; 2030=56/25; 2031=75/25.");
