@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.IO.Compression;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -103,6 +104,31 @@ public sealed class PlannerApiEndpointTests : IDisposable
         var diagnostics = await PostAsync<PowerDiagnosticsResponse>(client, "/api/power/diagnostics", new AnalysisFilter());
         Assert.NotNull(diagnostics);
         Assert.NotEmpty(diagnostics.Assumptions);
+
+        var exportResponse = await client.PostAsJsonAsync("/api/export/report", new ReportExportRequest
+        {
+            RoadThreshold = 1,
+            Scenario = new ChargingScenario { KwhPerKm = 1.0, CapacityKwh = 200, TargetSocPct = 80, MinSocPct = 15 },
+            StopSelections =
+            [
+                new StopLocationExportSelection(52.000, 5.000, "Depot A", 0.5)
+            ],
+            RoadSelections =
+            [
+                new RoadExportSelection(53.0, 6.0, 51.9, 4.5, 100, "Test corridor")
+            ]
+        });
+        exportResponse.EnsureSuccessStatusCode();
+        Assert.Equal("application/zip", exportResponse.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("route-analyse-export-", exportResponse.Content.Headers.ContentDisposition?.FileNameStar ?? exportResponse.Content.Headers.ContentDisposition?.FileName);
+
+        await using var zipStream = await exportResponse.Content.ReadAsStreamAsync();
+        using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
+        var names = archive.Entries.Select(x => x.FullName).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("rapport.pdf", names);
+        Assert.Contains("manifest.json", names);
+        Assert.Contains("summary.csv", names);
+        Assert.Contains(names, x => x.EndsWith("/trip_rows.csv", StringComparison.Ordinal));
     }
 
     public void Dispose()

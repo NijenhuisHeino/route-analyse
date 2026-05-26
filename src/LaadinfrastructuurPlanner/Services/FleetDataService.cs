@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using DuckDB.NET.Data;
 using LaadinfrastructuurPlanner.Models;
@@ -15,8 +17,8 @@ public sealed class FleetDataService
     private const string GeocodeCacheFile = "fleet_geocode.json";
     private const string UserAgent = "LaadinfrastructuurPlanner/1.0 (info@nijenhuistrucksolutions.nl)";
     private const string Disclaimer =
-        "Standplaatsen zijn ruw gegeocodeerd op basis van plaatsnaam (zonder exact adres). "
-        + "Markers kunnen afwijken van de werkelijke depotlocatie. Vervang later door exacte adressen.";
+        "Standplaatsen zijn gekoppeld aan exacte ritdata-adressen waar mogelijk. "
+        + "Review-markeringen geven aan dat de match handmatige controle nodig heeft.";
 
     private readonly RouteAnalysisOptions _options;
     private readonly DuckDbRouteStore _store;
@@ -55,8 +57,16 @@ public sealed class FleetDataService
                 []);
         }
 
-        var geocode = await EnsureGeocodingAsync(data.Depots.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase), cancellationToken);
         var tripStats = await ComputeTripStatsAsync(data.Vehicles, cancellationToken);
+        var addressEvidence = await ComputeDepotAddressEvidenceAsync(data.Vehicles, cancellationToken);
+        var fallbackNames = data.Depots
+            .Where(depot => !addressEvidence.ContainsKey(depot.Name))
+            .Select(depot => depot.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var geocode = fallbackNames.Length == 0
+            ? new Dictionary<string, GeocodeEntry>(StringComparer.OrdinalIgnoreCase)
+            : await EnsureGeocodingAsync(fallbackNames, cancellationToken);
 
         var depots = data.Depots
             .Select(depot =>
@@ -67,7 +77,7 @@ public sealed class FleetDataService
                 var enriched = vehiclesAtDepot
                     .Select(v =>
                     {
-                        var stats = tripStats.GetValueOrDefault(v.Vlootnummer);
+                        var stats = tripStats.GetValueOrDefault(NormalizeFleetCode(v.Vlootnummer));
                         return new FleetVehicle(
                             v.Vlootnummer,
                             v.Kenteken,
@@ -86,18 +96,26 @@ public sealed class FleetDataService
                     .ToArray();
 
                 var matched = enriched.Count(v => v.TripsInData > 0);
-                geocode.TryGetValue(depot.Name, out var location);
+                addressEvidence.TryGetValue(depot.Name, out var candidates);
+                geocode.TryGetValue(depot.Name, out var fallbackLocation);
+                var location = SelectDepotAddressMatch(depot.Name, vehiclesAtDepot.Length, candidates ?? [], fallbackLocation);
                 return new FleetDepot(
                     DepotId: "fleet:" + depot.Name,
                     Name: depot.Name,
                     Regio: depot.Regio,
                     TypeLocatie: depot.TypeLocatie,
-                    Lat: location?.Lat ?? 0,
-                    Lon: location?.Lon ?? 0,
-                    GeocodeQuery: location?.Query ?? "",
-                    GeocodeSource: location?.Source ?? "missing",
+                    Lat: location.Lat,
+                    Lon: location.Lon,
+                    GeocodeQuery: location.Query,
+                    GeocodeSource: location.Source,
                     Vehicles: enriched.Length,
                     MatchedInTrips: matched,
+                    Address: location.Address,
+                    MatchStatus: location.MatchStatus,
+                    MatchConfidencePct: location.ConfidencePct,
+                    EvidenceEvents: location.EvidenceEvents,
+                    EvidenceVehicles: location.EvidenceVehicles,
+                    AlternativeAddresses: location.Alternatives,
                     VehicleList: enriched);
             })
             .Where(d => d.Lat != 0 && d.Lon != 0)
@@ -265,6 +283,281 @@ public sealed class FleetDataService
     private static string NormalizeKenteken(string value)
     {
         return new string(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+    }
+
+    private static string NormalizeFleetCode(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.All(char.IsDigit) && trimmed.Length is > 0 and < 3
+            ? trimmed.PadLeft(3, '0')
+            : trimmed;
+    }
+
+    private async Task<Dictionary<string, List<DepotAddressCandidate>>> ComputeDepotAddressEvidenceAsync(
+        IReadOnlyList<FleetVehicleRaw> vehicles,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, List<DepotAddressCandidate>>(StringComparer.OrdinalIgnoreCase);
+        var fleetMappings = vehicles
+            .Select(v => new { Code = NormalizeFleetCode(v.Vlootnummer), Depot = v.Opstapplaats.Trim() })
+            .Where(v => v.Code.Length > 0 && v.Depot.Length > 0)
+            .Distinct()
+            .ToArray();
+        if (fleetMappings.Length == 0)
+        {
+            return result;
+        }
+
+        try
+        {
+            await _store.EnsureReadyAsync(cancellationToken);
+            await using var connection = _store.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            if (!HasStopsTable(connection))
+            {
+                return result;
+            }
+
+            var values = string.Join(
+                ",",
+                fleetMappings.Select(v => $"({SqlString(v.Code)}, {SqlString(v.Depot)})"));
+            using (var setup = connection.CreateCommand())
+            {
+                setup.CommandText = $"CREATE TEMP TABLE fleet_vehicle_depots AS SELECT * FROM (VALUES {values}) AS t(vehicle_code, depot_name);";
+                await setup.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                WITH trip_rows AS (
+                    SELECT
+                        CASE
+                            WHEN TRY_CAST(trim(s.wagencode) AS BIGINT) IS NOT NULL AND LENGTH(trim(s.wagencode)) < 3
+                                THEN LPAD(trim(s.wagencode), 3, '0')
+                            ELSE trim(s.wagencode)
+                        END AS vehicle_code,
+                        s.trip_id,
+                        CAST(s.adres AS VARCHAR) AS address,
+                        CAST(s.lat AS DOUBLE) AS lat,
+                        CAST(s.lon AS DOUBLE) AS lon,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY CASE
+                                WHEN TRY_CAST(trim(s.wagencode) AS BIGINT) IS NOT NULL AND LENGTH(trim(s.wagencode)) < 3
+                                    THEN LPAD(trim(s.wagencode), 3, '0')
+                                ELSE trim(s.wagencode)
+                            END, s.trip_id
+                            ORDER BY s.stop_seq ASC, s.gepland_start ASC, s.gepland_eind ASC, CAST(s.adres AS VARCHAR) ASC
+                        ) AS rn_first,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY CASE
+                                WHEN TRY_CAST(trim(s.wagencode) AS BIGINT) IS NOT NULL AND LENGTH(trim(s.wagencode)) < 3
+                                    THEN LPAD(trim(s.wagencode), 3, '0')
+                                ELSE trim(s.wagencode)
+                            END, s.trip_id
+                            ORDER BY s.stop_seq DESC, s.gepland_start DESC, s.gepland_eind DESC, CAST(s.adres AS VARCHAR) ASC
+                        ) AS rn_last
+                    FROM stops s
+                    JOIN fleet_vehicle_depots f
+                      ON CASE
+                            WHEN TRY_CAST(trim(s.wagencode) AS BIGINT) IS NOT NULL AND LENGTH(trim(s.wagencode)) < 3
+                                THEN LPAD(trim(s.wagencode), 3, '0')
+                            ELSE trim(s.wagencode)
+                         END = f.vehicle_code
+                    WHERE s.wagencode IS NOT NULL
+                      AND trim(s.wagencode) <> ''
+                      AND s.trip_id IS NOT NULL
+                      AND s.adres IS NOT NULL
+                      AND trim(CAST(s.adres AS VARCHAR)) <> ''
+                      AND s.lat IS NOT NULL
+                      AND s.lon IS NOT NULL
+                ),
+                endpoint_events AS (
+                    SELECT
+                        f.depot_name,
+                        r.vehicle_code,
+                        r.address,
+                        ROUND(r.lat, 6) AS lat,
+                        ROUND(r.lon, 6) AS lon
+                    FROM trip_rows r
+                    JOIN fleet_vehicle_depots f ON r.vehicle_code = f.vehicle_code
+                    WHERE r.rn_first = 1 OR r.rn_last = 1
+                )
+                SELECT
+                    depot_name,
+                    address,
+                    lat,
+                    lon,
+                    COUNT(*) AS events,
+                    COUNT(DISTINCT vehicle_code) AS vehicles
+                FROM endpoint_events
+                GROUP BY depot_name, address, lat, lon
+                ORDER BY depot_name, events DESC, vehicles DESC, address;
+                """;
+
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var depotName = GetString(reader, "depot_name");
+                if (depotName.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(depotName, out var candidates))
+                {
+                    candidates = [];
+                    result[depotName] = candidates;
+                }
+
+                candidates.Add(new DepotAddressCandidate(
+                    GetString(reader, "address"),
+                    GetDouble(reader, "lat"),
+                    GetDouble(reader, "lon"),
+                    GetLong(reader, "events"),
+                    GetLong(reader, "vehicles")));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Standplaats-adreskoppeling via ritdata mislukt; val terug op geocoding.");
+        }
+
+        return result;
+    }
+
+    private static DepotAddressMatch SelectDepotAddressMatch(
+        string depotName,
+        int vehicleCount,
+        IReadOnlyList<DepotAddressCandidate> candidates,
+        GeocodeEntry? fallbackLocation)
+    {
+        var ordered = candidates
+            .Where(c => c.Lat != 0 && c.Lon != 0 && !string.IsNullOrWhiteSpace(c.Address))
+            .OrderByDescending(c => c.Events)
+            .ThenByDescending(c => c.Vehicles)
+            .ThenBy(c => c.Address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (ordered.Length == 0)
+        {
+            return fallbackLocation is null
+                ? new DepotAddressMatch(0, 0, "", "missing", "", "missing", 0, 0, 0, [])
+                : new DepotAddressMatch(
+                    fallbackLocation.Lat,
+                    fallbackLocation.Lon,
+                    "",
+                    "review",
+                    fallbackLocation.Query,
+                    fallbackLocation.Source,
+                    0,
+                    0,
+                    0,
+                    []);
+        }
+
+        var depotPlace = NormalizePlace(ExtractDepotPlace(depotName));
+        var chosen = ordered.FirstOrDefault(c => AddressPlaceMatches(depotPlace, ExtractAddressPlace(c.Address))) ?? ordered[0];
+        var totalEvents = ordered.Sum(c => c.Events);
+        var confidence = totalEvents == 0 ? 0 : Math.Round(chosen.Events * 100.0 / totalEvents, 1);
+        var chosenPlaceMatches = AddressPlaceMatches(depotPlace, ExtractAddressPlace(chosen.Address));
+        var hasStrongAlternative = ordered.Any(c => !SameAddressCandidate(c, chosen) && c.Events >= chosen.Events * 0.8);
+        var hasIncompleteVehicleEvidence = vehicleCount > 0 && chosen.Vehicles < vehicleCount;
+        var matchStatus = chosenPlaceMatches
+            && confidence >= 45
+            && !hasStrongAlternative
+            && !hasIncompleteVehicleEvidence
+                ? "exact"
+                : "review";
+        var alternatives = ordered
+            .Where(c => !SameAddressCandidate(c, chosen))
+            .Take(3)
+            .Select(c => new FleetDepotAddressAlternative(
+                c.Address,
+                c.Lat,
+                c.Lon,
+                c.Events,
+                c.Vehicles,
+                totalEvents == 0 ? 0 : Math.Round(c.Events * 100.0 / totalEvents, 1)))
+            .ToArray();
+
+        return new DepotAddressMatch(
+            chosen.Lat,
+            chosen.Lon,
+            chosen.Address,
+            matchStatus,
+            chosen.Address,
+            "trip_endpoints",
+            confidence,
+            chosen.Events,
+            chosen.Vehicles,
+            alternatives);
+    }
+
+    private static bool SameAddressCandidate(DepotAddressCandidate left, DepotAddressCandidate right)
+    {
+        return string.Equals(left.Address, right.Address, StringComparison.OrdinalIgnoreCase)
+            && Math.Abs(left.Lat - right.Lat) < 0.000001
+            && Math.Abs(left.Lon - right.Lon) < 0.000001;
+    }
+
+    private static string ExtractDepotPlace(string depotName)
+    {
+        var trimmed = depotName.Trim();
+        foreach (var prefix in new[] { "Depot", "ScB", "SKP", "VBL", "VBG", "VGB", "CTT", "Crossdock", "IMEC", "E@H", "v. Osta" })
+        {
+            if (trimmed.StartsWith(prefix + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed[(prefix.Length + 1)..].Trim();
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static string ExtractAddressPlace(string address)
+    {
+        var match = Regex.Match(address, @"\b\d{4}\s?[A-Za-z]{2}\s+([^,]+)$");
+        if (match.Success)
+        {
+            return match.Groups[1].Value.Trim();
+        }
+
+        var comma = address.LastIndexOf(',');
+        return comma >= 0 && comma < address.Length - 1
+            ? address[(comma + 1)..].Trim()
+            : "";
+    }
+
+    private static bool AddressPlaceMatches(string normalizedDepotPlace, string addressPlace)
+    {
+        var normalizedAddressPlace = NormalizePlace(addressPlace);
+        return normalizedDepotPlace.Length > 0
+            && normalizedAddressPlace.Length > 0
+            && string.Equals(normalizedDepotPlace, normalizedAddressPlace, StringComparison.Ordinal);
+    }
+
+    private static string NormalizePlace(string value)
+    {
+        var words = Regex.Replace(value.Trim().ToLowerInvariant(), @"[^a-z0-9]+", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+        if (words.Count > 0 && (words[^1] == "zh" || words[^1] == "ov"))
+        {
+            words.RemoveAt(words.Count - 1);
+        }
+
+        var normalized = string.Join(' ', words);
+        return normalized switch
+        {
+            "den bosch" or "s hertogenbosch" or "hertogenbosch" => "den bosch",
+            "den haag" or "s gravenhage" or "gravenhage" => "den haag",
+            _ => normalized
+        };
+    }
+
+    private static string SqlString(string value)
+    {
+        return "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
     }
 
     private async Task<Dictionary<string, GeocodeEntry>> EnsureGeocodingAsync(IEnumerable<string> depotNames, CancellationToken cancellationToken)
@@ -486,16 +779,17 @@ public sealed class FleetDataService
             {
                 tripKmExpr = "0";
             }
+            var normalizedCodeExpr = "CASE WHEN TRY_CAST(trim(wagencode) AS BIGINT) IS NOT NULL AND LENGTH(trim(wagencode)) < 3 THEN LPAD(trim(wagencode), 3, '0') ELSE trim(wagencode) END";
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $@"
                 WITH per_trip AS (
-                    SELECT trim(wagencode) AS code,
+                    SELECT {normalizedCodeExpr} AS code,
                            trip_id,
                            {tripKmExpr} AS trip_km
                     FROM stops
                     WHERE wagencode IS NOT NULL AND trim(wagencode) <> ''
-                    GROUP BY trim(wagencode), trip_id
+                    GROUP BY {normalizedCodeExpr}, trip_id
                 )
                 SELECT code,
                        COUNT(*) AS trips,
@@ -512,7 +806,7 @@ public sealed class FleetDataService
                 }
                 var trips = reader.IsDBNull(1) ? 0L : Convert.ToInt64(reader.GetValue(1));
                 var km = reader.IsDBNull(2) ? 0.0 : Convert.ToDouble(reader.GetValue(2));
-                result[code] = new TripStat(trips, km);
+                result[NormalizeFleetCode(code)] = new TripStat(trips, km);
             }
         }
         catch (Exception ex)
@@ -521,6 +815,24 @@ public sealed class FleetDataService
         }
 
         return result;
+    }
+
+    private static string GetString(DbDataReader reader, string column)
+    {
+        var ordinal = reader.GetOrdinal(column);
+        return reader.IsDBNull(ordinal) ? "" : Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? "";
+    }
+
+    private static long GetLong(DbDataReader reader, string column)
+    {
+        var ordinal = reader.GetOrdinal(column);
+        return reader.IsDBNull(ordinal) ? 0 : Convert.ToInt64(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+    }
+
+    private static double GetDouble(DbDataReader reader, string column)
+    {
+        var ordinal = reader.GetOrdinal(column);
+        return reader.IsDBNull(ordinal) ? 0 : Convert.ToDouble(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
     }
 
     private static bool HasStopsTable(DuckDBConnection connection)
@@ -563,6 +875,20 @@ public sealed class FleetDataService
         string SoortBrandstof);
 
     private sealed record GeocodeEntry(double Lat, double Lon, string Query, string Source);
+
+    private sealed record DepotAddressCandidate(string Address, double Lat, double Lon, long Events, long Vehicles);
+
+    private sealed record DepotAddressMatch(
+        double Lat,
+        double Lon,
+        string Address,
+        string MatchStatus,
+        string Query,
+        string Source,
+        double ConfidencePct,
+        long EvidenceEvents,
+        long EvidenceVehicles,
+        FleetDepotAddressAlternative[] Alternatives);
 
     private sealed record TripStat(long Trips, double Km);
 }

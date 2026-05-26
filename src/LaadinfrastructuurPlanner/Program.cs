@@ -3,9 +3,12 @@ using LaadinfrastructuurPlanner.Endpoints;
 using LaadinfrastructuurPlanner.Services;
 using Microsoft.AspNetCore.Components.Server;
 using Microsoft.AspNetCore.SignalR;
+using QuestPDF.Infrastructure;
 using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
+
+QuestPDF.Settings.License = ParseQuestPdfLicense(builder.Configuration["ROUTE_ANALYSIS_QUESTPDF_LICENSE"]);
 
 var disableDetailedErrors = string.Equals(
     Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_DETAILED_ERRORS"),
@@ -96,6 +99,17 @@ static HashSet<string> ParseAllowedEmails(string? value)
     return (value ?? string.Empty)
         .Split([',', ';', ' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+}
+
+static LicenseType ParseQuestPdfLicense(string? value)
+{
+    return value?.Trim().ToLowerInvariant() switch
+    {
+        "professional" => LicenseType.Professional,
+        "enterprise" => LicenseType.Enterprise,
+        "evaluation" => LicenseType.Evaluation,
+        _ => LicenseType.Community,
+    };
 }
 
 static bool RequiresAllowedEmail(HttpContext context, HashSet<string> allowedEmails)

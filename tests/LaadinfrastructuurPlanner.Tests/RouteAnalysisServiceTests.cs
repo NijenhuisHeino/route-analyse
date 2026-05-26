@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using LaadinfrastructuurPlanner.Models;
@@ -253,6 +254,59 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReportExportBuildsZipWithPdfCsvAndSelectionTripRows()
+    {
+        var result = await _service.ExportReportAsync(new ReportExportRequest
+        {
+            RoadThreshold = 1,
+            Scenario = new ChargingScenario { KwhPerKm = 1.0, CapacityKwh = 200, TargetSocPct = 80, MinSocPct = 15 },
+            StopSelections =
+            [
+                new StopLocationExportSelection(52.000, 5.000, "Depot A", 0.5)
+            ],
+            RoadSelections =
+            [
+                new RoadExportSelection(53.0, 6.0, 51.9, 4.5, 100, "Test corridor")
+            ]
+        });
+
+        Assert.Equal("ok", result.Status);
+        Assert.Equal("application/zip", result.ContentType);
+        Assert.StartsWith("route-analyse-export-", result.FileName, StringComparison.Ordinal);
+
+        using var archive = new ZipArchive(new MemoryStream(result.Bytes), ZipArchiveMode.Read);
+        var names = archive.Entries.Select(x => x.FullName).ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("rapport.pdf", names);
+        Assert.Contains("manifest.json", names);
+        Assert.Contains("summary.csv", names);
+        Assert.Contains("top_stoplocaties.csv", names);
+        Assert.Contains("top_wegvlakken.csv", names);
+        Assert.Contains(names, x => x.EndsWith("/trip_rows.csv", StringComparison.Ordinal));
+
+        var pdf = ReadEntryBytes(archive, "rapport.pdf");
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4), StringComparison.Ordinal);
+
+        var tripRows = string.Join('\n', archive.Entries
+            .Where(x => x.FullName.EndsWith("/trip_rows.csv", StringComparison.Ordinal))
+            .Select(ReadEntryText));
+        Assert.Contains("stop", tripRows);
+        Assert.Contains("road", tripRows);
+        Assert.Contains("W1", tripRows);
+        Assert.Contains("W2", tripRows);
+    }
+
+    [Fact]
+    public async Task ReportExportRequiresAtLeastOneSelectedStopOrRoad()
+    {
+        var result = await _service.ExportReportAsync(new ReportExportRequest());
+
+        Assert.Equal("validation_error", result.Status);
+        Assert.Contains("Selecteer minimaal", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Bytes);
+    }
+
+    [Fact]
     public async Task WarmApiCallsStayUnderTwoSecondsOnSyntheticCache()
     {
         var filter = new AnalysisFilter { RoadThreshold = 1 };
@@ -283,6 +337,22 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
+    }
+
+    private static byte[] ReadEntryBytes(ZipArchive archive, string fullName)
+    {
+        var entry = archive.GetEntry(fullName) ?? throw new InvalidOperationException($"Entry not found: {fullName}");
+        using var stream = entry.Open();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    private static string ReadEntryText(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
 }

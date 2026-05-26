@@ -760,6 +760,25 @@ td span,
   font-style: italic;
 }
 
+.standplaats-popup__review {
+  margin: 2px 0;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.standplaats-popup__alternatives {
+  display: grid;
+  gap: 2px;
+  color: var(--eta-muted);
+  font-size: 11px;
+}
+
+.standplaats-popup__alternatives ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
 .standplaats-popup__disclaimer {
   margin: 6px 0 0;
   color: #b45309;

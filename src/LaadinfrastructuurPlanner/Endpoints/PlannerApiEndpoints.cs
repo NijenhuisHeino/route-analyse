@@ -52,6 +52,14 @@ public static class PlannerApiEndpoints
         api.MapPost("/power/export/nieuwegein", (RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.ExportNieuwegeinPowerReportAsync(cancellationToken));
 
+        api.MapPost("/export/report", async ([FromBody] ReportExportRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+        {
+            var result = await service.ExportReportAsync(request, cancellationToken);
+            return result.Status == "ok"
+                ? Results.File(result.Bytes, result.ContentType, result.FileName)
+                : Results.BadRequest(new { result.Status, result.Message });
+        });
+
         api.MapGet("/data-quality", (RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetDataQualityReportAsync(cancellationToken));
 

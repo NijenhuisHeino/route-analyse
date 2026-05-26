@@ -30,7 +30,7 @@
 - Fleet Excel-match is diagnostisch; de primaire `own`/`charter` classificatie blijft gebaseerd op ritdata omdat die voor alle route-acties aanwezig is.
 
 ## 6. Review door data-scientist / wiskundige (2026-05-25)
-- **Site-cap + anomaly_flag**: aggregate vermogen per uur per site nu hard begrensd op `SiteLimitMw` (default 1.4 MW); overschrijdingen worden gemarkeerd via `anomaly_flag` kolom in alle CSV-exports en doorgepropageerd naar `PowerHourlyCell`, `PowerDailyMetric`, `PowerHeatmapCell`, scenario-cellen.
+- **Site-cap + anomaly_flag**: `SiteLimitMw` (default 1.4 MW) is een planning-constraint; cellen tonen de werkelijke vraag en overschrijdingen worden gemarkeerd via `anomaly_flag` kolom in alle CSV-exports en doorgepropageerd naar `PowerHourlyCell`, `PowerDailyMetric`, `PowerHeatmapCell`, scenario-cellen.
 - **Minimum dwell**: default `MinDwellMin` opgehoogd van 0 naar 15 minuten; voorkomt division-by-small-number explosies bij korte dwell-tijden.
 - **DataQualityReport**: nieuwe endpoint `GET /api/data-quality` met null-rates, time-inversions, dubbele trip-ids, negative/zero distances, implausible speed (>120 km/h), long-dwell outliers. Telt absolute aantallen en percentages per regel.
 - **kWh/km per klasse + seizoen**: `RouteAnalysisDefaults.VehicleEnergyAssumptions` differentieert nu trekker (winter 1.60, summer 1.30), bakwagen (winter 1.00, summer 0.85), unknown (winter 1.30, summer 1.10). Helper `ResolveKwhPerKm(class, date)` beschikbaar voor consumers; SQL-pipeline override is follow-up.
@@ -45,7 +45,7 @@
 - **Backtest gap**: tool's `1.2 kWh/km` is **niet** gevalideerd tegen reëel meterverbruik. Template `scripts/backtest_template.csv` toegevoegd voor PostNL pilot-data; MAPE-berekening volgt zodra meterdata beschikbaar is.
 
 ## 7. SoC-bewuste vermogensberekening + foutbanner observability (2026-05-26)
-- **Front-loaded laadcurve**: vervangen van naive `capacity / standingHours` formule door fysisch realistisch model. Per voertuig: `demand_kwh = min(distance × kWh/km, capacity × (target-min)/100)`; vermogen = `MaxVehicleKw` zolang energie nog niet vol is, daarna 0. Voor 12 km rit met 400 kW lader: 14 kW in eerste uur, 0 kW daarna — i.p.v. 182 kW gespreid over 4 uur. Tests (`OriginalCsvWaitAndPauseActionsProduceHourlyPowerProfiles`) bijgewerkt naar realistische waardes.
+- **Front-loaded laadcurve**: vervangen van naive `capacity / standingHours` formule door conservatief model. Per voertuig: `demand_kwh = capacity`; vermogen = `MaxVehicleKw` zolang de batterijcapaciteit nog niet is geleverd, daarna 0. Voor 590 kWh en 400 kW lader: maximaal 400 kW in uur 1 en 190 kW in uur 2, afhankelijk van overlap met het stilstandvenster. Tests (`OriginalCsvWaitAndPauseActionsProduceHourlyPowerProfiles`) volgen dit conservatieve model.
 - **PowerProfileRequest**: nieuwe parameters `KwhPerKm` (default 1.2), `MinSocPct` (15), `TargetSocPct` (80) met clamping in `NormalizePowerRequest`. Zichtbaar in API responses en aanstuurbaar via UI-input (vervolgwerk: UI-knoppen toevoegen).
 - **Property test**: `ChargingEnergyPerVehicleNeverExceedsUsableSoc` en `FrontLoadedAllocationProducesZeroPowerAfterChargeCompletes` toegevoegd.
 - **Foutbanner observability**: `CircuitOptions.DetailedErrors = true` standaard aan (toggle via `ROUTE_ANALYSIS_DETAILED_ERRORS=false`). Nieuwe in-memory `RecentExceptionBuffer` met laatste 50 warnings/errors via ILoggerProvider. Endpoint `GET /api/debug/recent-errors` toont JSON met stack traces. MainLayout error-banner heeft nu "Details"-link die naar dat endpoint linkt.

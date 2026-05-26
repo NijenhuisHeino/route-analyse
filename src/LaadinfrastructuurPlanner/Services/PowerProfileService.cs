@@ -508,10 +508,13 @@ public sealed partial class RouteAnalysisService
             var demandKwh = capacityKwh;
             if (demandKwh <= 0) continue;
 
-            // Front-loaded charging: pull max power until energy budget is depleted.
+            // Smart/spreidende laadcurve: verdeel demand gelijkmatig over de hele stilstand,
+            // begrensd op MaxVehicleKw. Reden: PostNL kan zijn laadschema sturen — er is geen
+            // fysieke reden om altijd op piek-vermogen te laden als er meer tijd beschikbaar is.
+            // 590 kWh ÷ 8 h = 74 kW (slim), niet 400 kW × 1.475 h (worst-case piek).
             var standingHours = (powerEvent.EndTime - powerEvent.StartTime).TotalHours;
-            var timeToFullHours = Math.Min(standingHours, demandKwh / maxVehicleKw);
-            var chargeEnd = powerEvent.StartTime.AddHours(timeToFullHours);
+            if (standingHours <= 0) continue;
+            var avgVehiclePowerKw = Math.Min(maxVehicleKw, demandKwh / standingHours);
 
             var cursor = new DateTime(powerEvent.StartTime.Year, powerEvent.StartTime.Month, powerEvent.StartTime.Day, powerEvent.StartTime.Hour, 0, 0);
             while (cursor < powerEvent.EndTime)
@@ -525,10 +528,8 @@ public sealed partial class RouteAnalysisService
                     continue;
                 }
 
-                var chargeStart = presenceStart > powerEvent.StartTime ? presenceStart : powerEvent.StartTime;
-                var chargeStop = chargeEnd < presenceEnd ? chargeEnd : presenceEnd;
-                var chargingHoursInSlot = Math.Max(0, (chargeStop - chargeStart).TotalHours);
-                var energyThisSlotKwh = maxVehicleKw * chargingHoursInSlot;
+                var overlapHours = (presenceEnd - presenceStart).TotalHours;
+                var energyThisSlotKwh = avgVehiclePowerKw * overlapHours;
 
                 if (!slots.TryGetValue(cursor, out var accumulator))
                 {
@@ -538,12 +539,11 @@ public sealed partial class RouteAnalysisService
 
                 accumulator.Vehicles.Add(powerEvent.VehicleKey);
                 accumulator.Events++;
-                // Average power over the 1-hour slot: energy delivered / 1 h.
+                // Average power over the 1-hour slot: energy delivered / 1 h (kWh per uur = kW gemiddeld).
                 accumulator.RequiredKw += energyThisSlotKwh;
                 if (includeVehicleDemands)
                 {
-                    var avgPowerForSlot = energyThisSlotKwh; // per 1h slot
-                    accumulator.AddVehicleDemand(powerEvent, energyThisSlotKwh, avgPowerForSlot);
+                    accumulator.AddVehicleDemand(powerEvent, energyThisSlotKwh, energyThisSlotKwh);
                 }
 
                 cursor = next;
@@ -753,7 +753,7 @@ public sealed partial class RouteAnalysisService
         var assumptions = new List<string>
         {
             "Vermogensvraag per voertuig: conservatief = volledige batterijcapaciteit per stop (geen distance-aanname; we weten niet wat onderweg is geladen).",
-            "Front-loaded laadcurve: vermogen = MaxVehicleKw zolang energie < capaciteit; daarna 0. Voorbeeld: 590 kWh @ 400 kW → uur 1: 400 kW, uur 2: 190 kW, uur 3+: 0.",
+            "Smart/spreidende laadcurve: vermogen = min(MaxVehicleKw, capacity ÷ stilstanduren). Voorbeeld: 590 kWh over 8 uur stilstand = 74 kW gespreid. Over 1 uur = 400 kW (cap).",
             "Default batterijcapaciteit: 590 kWh, instelbaar via de Batterijcapaciteit-input.",
             "Default voertuigacceptatie: 400 kW per truck; MCS-selectie verhoogt dit naar 1.500 kW.",
             "Site-limit (SiteLimitMw, default 1.4 MW): planning-constraint. Cellen tonen de werkelijke vraag; cellen boven de cap krijgen anomaly_flag = true en zijn visueel gemarkeerd.",

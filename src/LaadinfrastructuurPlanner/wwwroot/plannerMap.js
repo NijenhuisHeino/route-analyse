@@ -127,6 +127,12 @@ window.routePlannerMap = (() => {
           typeLocatie: depot.typeLocatie || "",
           vehicles: depot.vehicles || 0,
           matchedInTrips: depot.matchedInTrips || 0,
+          address: depot.address || "",
+          matchStatus: depot.matchStatus || "missing",
+          matchConfidencePct: depot.matchConfidencePct || 0,
+          evidenceEvents: depot.evidenceEvents || 0,
+          evidenceVehicles: depot.evidenceVehicles || 0,
+          alternativeAddresses: JSON.stringify(depot.alternativeAddresses || []),
           vehicleList: JSON.stringify(depot.vehicleList || [])
         },
         geometry: { type: "Point", coordinates: [depot.lon, depot.lat] }
@@ -352,7 +358,15 @@ window.routePlannerMap = (() => {
         source: "fleet-standplaatsen",
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["get", "vehicles"], 1, 6, 30, 18],
-          "circle-color": "#2563eb",
+          "circle-color": [
+            "match",
+            ["get", "matchStatus"],
+            "exact",
+            "#2563eb",
+            "review",
+            "#f59e0b",
+            "#64748b"
+          ],
           "circle-opacity": 0.85,
           "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff"
@@ -365,6 +379,8 @@ window.routePlannerMap = (() => {
         const p = feature.properties || {};
         let vehicles = [];
         try { vehicles = JSON.parse(p.vehicleList || "[]"); } catch { vehicles = []; }
+        let alternatives = [];
+        try { alternatives = JSON.parse(p.alternativeAddresses || "[]"); } catch { alternatives = []; }
         const rows = vehicles.slice(0, 50).map((v) => {
           const trips = Number(v.tripsInData || 0);
           const tripsLabel = trips > 0 ? `${trips.toLocaleString("nl-NL")} ritten` : "geen ritten in data";
@@ -372,19 +388,39 @@ window.routePlannerMap = (() => {
         }).join("");
         const hiddenCount = vehicles.length - Math.min(vehicles.length, 50);
         const hiddenNote = hiddenCount > 0 ? `<p class="standplaats-popup__hidden">+${hiddenCount} meer voertuig(en) niet getoond</p>` : "";
+        const confidence = Number(p.matchConfidencePct || 0);
+        const evidenceEvents = Number(p.evidenceEvents || 0);
+        const evidenceVehicles = Number(p.evidenceVehicles || 0);
+        const reviewNote = p.matchStatus === "review"
+          ? `<p class="standplaats-popup__review">Controleer deze match: ritdata geeft meerdere of beperkte adreskandidaten.</p>`
+          : "";
+        const missingNote = p.matchStatus === "missing"
+          ? `<p class="standplaats-popup__review">Geen exact ritdata-adres gevonden.</p>`
+          : "";
+        const alternativeRows = alternatives.slice(0, 3).map((a) =>
+          `<li>${escapeHtml(a.address || "")} (${Number(a.confidencePct || 0).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}%)</li>`
+        ).join("");
+        const alternativesBlock = alternativeRows
+          ? `<div class="standplaats-popup__alternatives"><span>Alternatieven</span><ul>${alternativeRows}</ul></div>`
+          : "";
         new maplibregl.Popup({ closeButton: true, maxWidth: "420px" })
           .setLngLat(feature.geometry.coordinates)
           .setHTML(`
             <div class="standplaats-popup">
               <strong>${escapeHtml(p.name || "Standplaats")}</strong>
               <span>${escapeHtml(p.typeLocatie || "")}${p.regio ? " · " + escapeHtml(p.regio) : ""}</span>
+              <span>${escapeHtml(p.address || "Geen exact adres beschikbaar")}</span>
+              <span>Match: ${escapeHtml(p.matchStatus || "missing")} · ${confidence.toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% · ${evidenceEvents.toLocaleString("nl-NL")} endpoint-events · ${evidenceVehicles.toLocaleString("nl-NL")} voertuigen</span>
+              ${reviewNote}
+              ${missingNote}
+              ${alternativesBlock}
               <span>${Number(p.vehicles || 0)} voertuigen · ${Number(p.matchedInTrips || 0)} met ritten in data</span>
               <table class="standplaats-popup__table">
                 <thead><tr><th>Kenteken</th><th>Vloot</th><th>Merk</th><th>Activiteit</th></tr></thead>
                 <tbody>${rows}</tbody>
               </table>
               ${hiddenNote}
-              <p class="standplaats-popup__disclaimer">Standplaats is ruw gegeocodeerd op plaatsnaam.</p>
+              <p class="standplaats-popup__disclaimer">Adres is afgeleid uit begin- en eindpunten van ritten; review vraagt handmatige controle.</p>
             </div>
           `)
           .addTo(map);

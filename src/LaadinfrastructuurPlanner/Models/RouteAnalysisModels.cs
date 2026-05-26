@@ -405,6 +405,52 @@ public sealed record PowerReportExportResponse(
     string OutputDirectory,
     string[] Files);
 
+public sealed record StopLocationExportSelection(
+    double Lat,
+    double Lon,
+    string Label,
+    double RadiusKm = 0.5);
+
+public sealed record RoadExportSelection(
+    double Lat1,
+    double Lon1,
+    double Lat2,
+    double Lon2,
+    double RadiusKm = 3,
+    string? Label = null);
+
+public sealed record ReportExportRequest : AnalysisFilter
+{
+    public ChargingScenario Scenario { get; init; } = new();
+    public StopLocationExportSelection[] StopSelections { get; init; } = [];
+    public RoadExportSelection[] RoadSelections { get; init; } = [];
+}
+
+public sealed record ReportExportResult(
+    string Status,
+    string? Message,
+    string FileName,
+    string ContentType,
+    byte[] Bytes);
+
+public sealed record SelectionTripRow(
+    string SelectionType,
+    string? SelectionId,
+    string Title,
+    string Wagencode,
+    string Kentekens,
+    DateOnly TripDate,
+    string TripId,
+    DateTime StartTime,
+    DateTime EndTime,
+    double Lat,
+    double Lon,
+    string Address,
+    double DistanceKm,
+    double StandingHours,
+    double DemandKwh,
+    double RequiredKw);
+
 public sealed record SelectionDetailResponse(
     string Status,
     string SelectionType,
@@ -497,6 +543,14 @@ public sealed record FleetVehicle(
     long TripsInData,
     double KmInData);
 
+public sealed record FleetDepotAddressAlternative(
+    string Address,
+    double Lat,
+    double Lon,
+    long Events,
+    long Vehicles,
+    double ConfidencePct);
+
 public sealed record FleetDepot(
     string DepotId,
     string Name,
@@ -508,6 +562,12 @@ public sealed record FleetDepot(
     string GeocodeSource,
     long Vehicles,
     long MatchedInTrips,
+    string Address,
+    string MatchStatus,
+    double MatchConfidencePct,
+    long EvidenceEvents,
+    long EvidenceVehicles,
+    FleetDepotAddressAlternative[] AlternativeAddresses,
     FleetVehicle[] VehicleList);
 
 public sealed record FleetDepotsResponse(
