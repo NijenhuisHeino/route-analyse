@@ -602,7 +602,13 @@ window.routePlannerMap = (() => {
     scrollToSelectionDetail: (elementId) => {
       const scroll = () => {
         const el = document.getElementById(elementId || "selection-detail");
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!el) return;
+        const top = window.scrollY + el.getBoundingClientRect().top;
+        const contextOffset = Math.min(window.innerHeight * 0.42, 360);
+        window.scrollTo({
+          top: Math.max(0, top - contextOffset),
+          behavior: "smooth"
+        });
       };
       window.requestAnimationFrame(() => window.setTimeout(scroll, 0));
     },

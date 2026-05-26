@@ -395,6 +395,8 @@ td span,
 }
 
 .planner-main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 22px 24px 28px;
 }
@@ -503,6 +505,31 @@ td span,
 .simulation-panel {
   overflow: hidden;
   margin-bottom: 16px;
+}
+
+.map-panel {
+  order: 20;
+}
+
+.map-selection-detail {
+  order: 21;
+}
+
+.power-profile-panel {
+  order: 30;
+}
+
+.compact-selection {
+  order: 31;
+}
+
+.ze-panel,
+.compact-empty {
+  order: 40;
+}
+
+.content-grid {
+  order: 50;
 }
 
 .panel-heading {

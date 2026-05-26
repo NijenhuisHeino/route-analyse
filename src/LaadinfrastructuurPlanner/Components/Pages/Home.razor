@@ -551,7 +551,7 @@
 
         @if (SelectedDetail is not null)
         {
-            <section id="selection-detail" class="selection-panel">
+            <section id="selection-detail" class="selection-panel map-selection-detail">
                 <div class="panel-heading">
                     <div>
                         <h3>@SelectedDetail.Title</h3>
@@ -950,10 +950,10 @@
             await RefreshMapAsync();
         }
 
-        if (PendingSelectionScroll && MapReady)
+        if (PendingSelectionScroll && MapReady && SelectedDetail is not null)
         {
             PendingSelectionScroll = false;
-            await JS.InvokeVoidAsync("routePlannerMap.scrollToSelectionDetail", "selection-detail");
+            await ScrollToSelectionDetailAsync();
         }
     }
 
@@ -1393,6 +1393,14 @@
         if (MapReady)
         {
             await JS.InvokeVoidAsync("routePlannerMap.clearRoadSelection");
+        }
+    }
+
+    private async Task ScrollToSelectionDetailAsync()
+    {
+        if (MapReady && SelectedDetail is not null)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.scrollToSelectionDetail", "selection-detail");
         }
     }
 
