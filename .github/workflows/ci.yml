@@ -1,0 +1,30 @@
+name: Route Analyse CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test-and-publish:
+    name: Test and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore LaadinfrastructuurPlanner.slnx
+
+      - name: Test
+        run: dotnet test LaadinfrastructuurPlanner.slnx --no-restore --configuration Release --logger "console;verbosity=normal"
+
+      - name: Publish smoke
+        run: dotnet publish src/LaadinfrastructuurPlanner -c Release --no-restore -o .deploy/route-analyse
