@@ -49,6 +49,9 @@ ROUTE_ANALYSIS_ALLOWED_EMAILS=info@example.com
 PATH="$HOME/.dotnet:$PATH" dotnet test LaadinfrastructuurPlanner.slnx
 ```
 
+Elke pull request en elke push naar `main` draait dezelfde testset via GitHub
+Actions, plus een Release publish-smoke. Main niet mergen als die check rood is.
+
 ## Publiceren
 
 ```bash
