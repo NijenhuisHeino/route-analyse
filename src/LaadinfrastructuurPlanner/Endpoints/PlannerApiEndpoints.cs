@@ -37,6 +37,12 @@ public static class PlannerApiEndpoints
         api.MapPost("/roads/selection", ([FromBody] RoadSelectionRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetRoadSelectionAsync(request, cancellationToken));
 
+        api.MapPost("/roads/break-demand", ([FromBody] RoadBreakDemandRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetRoadBreakDemandMapAsync(request, cancellationToken));
+
+        api.MapPost("/roads/break-demand/detail", ([FromBody] RoadBreakDemandDetailRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
+            service.GetRoadBreakDemandDetailAsync(request, cancellationToken));
+
         api.MapPost("/charging/scenario", ([FromBody] ChargingScenarioRequest request, RouteAnalysisService service, CancellationToken cancellationToken) =>
             service.GetChargingScenarioAsync(request, cancellationToken));
 
