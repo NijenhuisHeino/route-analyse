@@ -198,6 +198,84 @@ public sealed record RoadSelectionRequest : AnalysisFilter
     public ChargingScenario Scenario { get; init; } = new();
 }
 
+public record RoadBreakDemandRequest : AnalysisFilter
+{
+    public double KwhPerKm { get; init; } = 1.2;
+    public double WindowStartHours { get; init; } = 3.5;
+    public double WindowEndHours { get; init; } = 4.5;
+    public double BreakDurationHours { get; init; } = 0.75;
+    public double ShiftResetGapHours { get; init; } = 2.0;
+    public double ResetLocationRadiusKm { get; init; } = 0.75;
+}
+
+public sealed record RoadBreakDemandDetailRequest : RoadBreakDemandRequest
+{
+    public RoadSelection Road { get; init; } = new(0, 0, 0, 0);
+}
+
+public sealed record RoadBreakDemandMapResponse(
+    string Status,
+    string? Message,
+    double WindowStartHours,
+    double WindowEndHours,
+    double BreakDurationHours,
+    RoadBreakDemandLine[] Lines,
+    RoadBreakDemandDiagnostics Diagnostics,
+    bool FromCache);
+
+public sealed record RoadBreakDemandLine(
+    double Lat1,
+    double Lon1,
+    double Lat2,
+    double Lon2,
+    string SegmentId,
+    string Direction,
+    double PeakMw,
+    double TotalKwh,
+    long Vehicles,
+    long Passages,
+    string RouteQuality,
+    double SelectionRadiusKm,
+    RoadPoint[]? Coordinates = null);
+
+public sealed record RoadBreakDemandDiagnostics(
+    long TotalTrips,
+    long IncludedPassages,
+    long ExcludedTrips,
+    long LowQualityMatches,
+    string[] ExclusionReasons);
+
+public sealed record RoadBreakDemandDetailResponse(
+    string Status,
+    string? Message,
+    string Title,
+    double PeakMw,
+    double TotalKwh,
+    long Vehicles,
+    long Passages,
+    RoadBreakQuarterCell[] QuarterProfile,
+    RoadBreakVehicleRow[] VehiclesInWindow,
+    RoadBreakDemandDiagnostics Diagnostics);
+
+public sealed record RoadBreakQuarterCell(
+    DateTime SlotStart,
+    string Label,
+    long Vehicles,
+    double RequiredKw,
+    double RequiredMw,
+    double DemandKwh);
+
+public sealed record RoadBreakVehicleRow(
+    string Wagencode,
+    string Kenteken,
+    DateTime ShiftStart,
+    DateTime BreakStart,
+    double DriveHoursSinceShiftStart,
+    double KmSinceShiftStart,
+    double DemandKwh,
+    double RequiredKw,
+    string RouteQuality);
+
 public sealed record ChargingScenarioRequest : AnalysisFilter
 {
     public string SelectionType { get; init; } = "depot";

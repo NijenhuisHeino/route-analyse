@@ -269,6 +269,23 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandDefaultsExposeWindowAndDiagnostics()
+    {
+        var demand = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            KwhPerKm = 1.0
+        });
+
+        Assert.Equal("ok", demand.Status);
+        Assert.Equal(3.5, demand.WindowStartHours);
+        Assert.Equal(4.5, demand.WindowEndHours);
+        Assert.Equal(0.75, demand.BreakDurationHours);
+        Assert.True(demand.Diagnostics.TotalTrips >= 0);
+        Assert.NotNull(demand.Lines);
+    }
+
+    [Fact]
     public async Task WarmApiCallsStayUnderTwoSecondsOnSyntheticCache()
     {
         var filter = new AnalysisFilter { RoadThreshold = 1 };
