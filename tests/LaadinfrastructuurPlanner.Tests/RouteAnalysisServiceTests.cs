@@ -315,7 +315,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
 
         Assert.Equal("ok", detail.Status);
         Assert.Contains(detail.VehiclesInWindow, row => row.Wagencode == "W3");
-        Assert.Single(detail.VehiclesInWindow.Where(row => row.Wagencode == "W3"));
+        Assert.Single(detail.VehiclesInWindow, row => row.Wagencode == "W3");
         Assert.All(detail.VehiclesInWindow, row => Assert.InRange(row.DriveHoursSinceShiftStart, 3.5, 4.5));
 
         var customerGapDetail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
