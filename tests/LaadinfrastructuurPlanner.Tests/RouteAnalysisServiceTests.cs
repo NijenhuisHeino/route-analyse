@@ -308,7 +308,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
         {
-            Road = new RoadSelection(52.0, 5.0, 52.02, 5.02, 100),
+            Road = new RoadSelection(52.0, 5.0, 52.02, 5.02, 3),
             KwhPerKm = 1.0,
             ShiftResetGapHours = 2.0
         });
@@ -320,7 +320,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
 
         var customerGapDetail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
         {
-            Road = new RoadSelection(52.5, 5.5, 52.6, 5.6, 20),
+            Road = new RoadSelection(52.6, 5.6, 53.0, 6.0, 5),
             KwhPerKm = 1.0,
             ShiftResetGapHours = 2.0
         });

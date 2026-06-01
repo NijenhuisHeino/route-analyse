@@ -22,9 +22,7 @@ public sealed partial class RouteAnalysisService
         var key = CacheKey("road-break-demand-map", normalized);
         return await GetOrCreateAsync(key, async () =>
         {
-            using var connection = OpenConnection();
-            var trips = await QueryRoadBreakTripsAsync(connection, normalized, cancellationToken);
-            var result = BuildRoadBreakDemand(trips, normalized);
+            var result = await GetRoadBreakDemandCalculationAsync(ToRoadBreakEventRequest(normalized), cancellationToken);
             var lines = BuildRoadBreakDemandLines(result.Events, normalized);
 
             return new RoadBreakDemandMapResponse(
@@ -53,16 +51,14 @@ public sealed partial class RouteAnalysisService
         var key = CacheKey("road-break-demand-detail", normalized);
         return await GetOrCreateAsync(key, async () =>
         {
-            using var connection = OpenConnection();
-            var trips = await QueryRoadBreakTripsAsync(connection, normalized, cancellationToken);
-            var result = BuildRoadBreakDemand(trips, normalized);
+            var result = await GetRoadBreakDemandCalculationAsync(ToRoadBreakEventRequest(normalized), cancellationToken);
             var selected = result.Events
                 .Where(x => IsRoadBreakEventInSelection(x, normalized.Road))
                 .OrderBy(x => x.BreakStart)
                 .ThenBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            var profile = BuildRoadBreakQuarterProfile(selected);
+            var profile = BuildRoadBreakQuarterProfile(selected, normalized.BreakDurationHours);
             var totalKwh = selected.Sum(x => x.DemandKwh);
             var peakMw = profile.Length == 0 ? 0 : profile.Max(x => x.RequiredMw);
             var vehicles = selected
@@ -75,7 +71,7 @@ public sealed partial class RouteAnalysisService
             {
                 IncludedPassages = selected.Length,
                 LowQualityMatches = selected.LongCount(x => x.RouteQuality.StartsWith("laag", StringComparison.OrdinalIgnoreCase)),
-                ExcludedTrips = Math.Max(0, result.Diagnostics.TotalTrips - selected.Length),
+                ExcludedTrips = result.Diagnostics.ExcludedTrips,
                 ExclusionReasons = BuildRoadBreakDetailReasons(result.Diagnostics, selected.Length)
             };
 
@@ -90,6 +86,19 @@ public sealed partial class RouteAnalysisService
                 profile,
                 selected.Select(ToRoadBreakVehicleRow).ToArray(),
                 diagnostics);
+        });
+    }
+
+    private async Task<RoadBreakDemandCalculation> GetRoadBreakDemandCalculationAsync(
+        RoadBreakDemandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var key = CacheKey("road-break-demand-events", request);
+        return await GetOrCreateAsync(key, async () =>
+        {
+            using var connection = OpenConnection();
+            var trips = await QueryRoadBreakTripsAsync(connection, request, cancellationToken);
+            return BuildRoadBreakDemand(trips, request);
         });
     }
 
@@ -145,7 +154,7 @@ public sealed partial class RouteAnalysisService
         var excludedInvalid = 0L;
         var resetCount = 0L;
 
-        foreach (var dayTrips in trips.GroupBy(x => new { x.Wagencode, x.TripDate }))
+        foreach (var vehicleTrips in trips.GroupBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase))
         {
             DateTime? shiftStart = null;
             DateTime? previousEnd = null;
@@ -154,7 +163,7 @@ public sealed partial class RouteAnalysisService
             var driveHours = 0.0;
             var shiftKm = 0.0;
 
-            foreach (var trip in dayTrips.OrderBy(x => x.TripStart).ThenBy(x => x.TripId, StringComparer.OrdinalIgnoreCase))
+            foreach (var trip in vehicleTrips.OrderBy(x => x.TripStart).ThenBy(x => x.TripId, StringComparer.OrdinalIgnoreCase))
             {
                 if (shiftStart is null)
                 {
@@ -260,9 +269,9 @@ public sealed partial class RouteAnalysisService
             {
                 var rows = group.ToArray();
                 var first = rows[0];
-                var slotPeakKw = rows
-                    .GroupBy(x => QuarterSlot(x.BreakStart))
-                    .Select(x => x.Sum(y => y.RequiredKw))
+                var slotPeakKw = ExpandRoadBreakQuarterLoads(rows, request.BreakDurationHours)
+                    .GroupBy(x => x.SlotStart)
+                    .Select(x => x.Sum(y => y.Event.RequiredKw))
                     .DefaultIfEmpty(0)
                     .Max();
                 var vehicles = rows
@@ -295,21 +304,24 @@ public sealed partial class RouteAnalysisService
             .ToArray();
     }
 
-    private static RoadBreakQuarterCell[] BuildRoadBreakQuarterProfile(IReadOnlyList<RoadBreakEvent> events)
+    private static RoadBreakQuarterCell[] BuildRoadBreakQuarterProfile(
+        IReadOnlyList<RoadBreakEvent> events,
+        double breakDurationHours)
     {
-        return events
-            .GroupBy(x => QuarterSlot(x.BreakStart))
+        return ExpandRoadBreakQuarterLoads(events, breakDurationHours)
+            .GroupBy(x => x.SlotStart)
             .OrderBy(group => group.Key)
             .Select(group =>
             {
-                var requiredKw = group.Sum(x => x.RequiredKw);
+                var loads = group.ToArray();
+                var requiredKw = loads.Sum(x => x.Event.RequiredKw);
                 return new RoadBreakQuarterCell(
                     group.Key,
                     group.Key.ToString("HH:mm", CultureInfo.InvariantCulture),
-                    group.Select(x => VehicleDemandKey(x.Wagencode, x.Kenteken)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
+                    loads.Select(x => VehicleDemandKey(x.Event.Wagencode, x.Event.Kenteken)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
                     Math.Round(requiredKw, 1),
                     Math.Round(requiredKw / 1000.0, 3),
-                    Math.Round(group.Sum(x => x.DemandKwh), 1));
+                    Math.Round(loads.Sum(x => x.Event.RequiredKw * x.OverlapHours), 1));
             })
             .ToArray();
     }
@@ -471,10 +483,7 @@ public sealed partial class RouteAnalysisService
 
     private static bool IsRoadBreakEventInSelection(RoadBreakEvent row, RoadSelection road)
     {
-        var midLat = (road.Lat1 + road.Lat2) / 2.0;
-        var midLon = (road.Lon1 + road.Lon2) / 2.0;
-        return HaversineKm(row.BreakLat, row.BreakLon, midLat, midLon) <= road.RadiusKm
-            || DistancePointToSegmentKm(midLat, midLon, row.TripStartLat, row.TripStartLon, row.TripEndLat, row.TripEndLon) <= road.RadiusKm;
+        return DistancePointToSegmentKm(row.BreakLat, row.BreakLon, road.Lat1, road.Lon1, road.Lat2, road.Lon2) <= road.RadiusKm;
     }
 
     private static double DistancePointToSegmentKm(
@@ -571,6 +580,54 @@ public sealed partial class RouteAnalysisService
         return start + (end - start) * progress;
     }
 
+    private static RoadBreakDemandRequest ToRoadBreakEventRequest(RoadBreakDemandRequest request)
+    {
+        return new RoadBreakDemandRequest
+        {
+            DateFrom = request.DateFrom,
+            DateTo = request.DateTo,
+            VervoerderTypes = request.VervoerderTypes,
+            Vervoerders = request.Vervoerders,
+            Wagencodes = request.Wagencodes,
+            MinDwellMin = request.MinDwellMin,
+            RoadThreshold = 1,
+            RoadTopPercent = 100,
+            MarkerTopN = request.MarkerTopN,
+            ZeZoneMode = request.ZeZoneMode,
+            KwhPerKm = request.KwhPerKm,
+            WindowStartHours = request.WindowStartHours,
+            WindowEndHours = request.WindowEndHours,
+            BreakDurationHours = request.BreakDurationHours,
+            ShiftResetGapHours = request.ShiftResetGapHours,
+            ResetLocationRadiusKm = request.ResetLocationRadiusKm
+        };
+    }
+
+    private static RoadBreakQuarterLoad[] ExpandRoadBreakQuarterLoads(
+        IReadOnlyList<RoadBreakEvent> events,
+        double breakDurationHours)
+    {
+        var loads = new List<RoadBreakQuarterLoad>();
+        foreach (var row in events)
+        {
+            var start = row.BreakStart;
+            var end = row.BreakStart.AddHours(Math.Max(0.25, breakDurationHours));
+            for (var slot = QuarterSlot(start); slot < end; slot = slot.AddMinutes(15))
+            {
+                var slotEnd = slot.AddMinutes(15);
+                var overlapStart = start > slot ? start : slot;
+                var overlapEnd = end < slotEnd ? end : slotEnd;
+                var overlapHours = (overlapEnd - overlapStart).TotalHours;
+                if (overlapHours > 0)
+                {
+                    loads.Add(new RoadBreakQuarterLoad(slot, row, overlapHours));
+                }
+            }
+        }
+
+        return loads.ToArray();
+    }
+
     private sealed record RoadBreakTrip(
         string Wagencode,
         string Kenteken,
@@ -607,6 +664,8 @@ public sealed partial class RouteAnalysisService
     private sealed record RoadBreakResetLocation(double Lat, double Lon);
 
     private sealed record RoadBreakLocationEvent(string Wagencode, double Lat, double Lon);
+
+    private sealed record RoadBreakQuarterLoad(DateTime SlotStart, RoadBreakEvent Event, double OverlapHours);
 
     private sealed record RoadBreakDemandCalculation(
         List<RoadBreakEvent> Events,
