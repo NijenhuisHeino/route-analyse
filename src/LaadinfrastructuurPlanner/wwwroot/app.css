@@ -291,12 +291,18 @@ td span,
   color: #92400e;
 }
 
-.charger-controls {
+.demand-controls {
   padding-top: 2px;
 }
 
-.demand-controls {
-  padding-top: 2px;
+.filter-group-title {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  color: #2e2343;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .primary-action,
@@ -737,6 +743,10 @@ td span,
 
 .legend-line.road-line {
   background: linear-gradient(90deg, #ddd6fe, #4c1d95);
+}
+
+.legend-line.road-break-demand-line {
+  background: linear-gradient(90deg, #fde68a, #f97316, #b91c1c);
 }
 
 .legend-gradient {

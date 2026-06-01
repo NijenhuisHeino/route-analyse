@@ -156,6 +156,25 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Single(publicChargers.Markers);
         Assert.Equal("Publieke HPC", publicChargers.Markers[0].Name);
 
+        var fourConnectors = await _service.GetChargersAsync(new ChargerFilter
+        {
+            MinPowerKw = 350,
+            MinConnectors = 4,
+            Access = ["Publiek", "Privaat"],
+        });
+
+        Assert.Equal(2, fourConnectors.Markers.Length);
+
+        var eightConnectors = await _service.GetChargersAsync(new ChargerFilter
+        {
+            MinPowerKw = 350,
+            MinConnectors = 8,
+            Access = ["Publiek", "Privaat"],
+        });
+
+        var eightConnectorMarker = Assert.Single(eightConnectors.Markers);
+        Assert.Equal("Publieke HPC", eightConnectorMarker.Name);
+
         var dedicated = await _service.GetChargersAsync(new ChargerFilter
         {
             MinPowerKw = 400,

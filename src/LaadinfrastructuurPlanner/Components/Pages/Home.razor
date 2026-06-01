@@ -100,6 +100,16 @@
             </div>
             <div class="layer-toggle-item">
                 <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-pauzelaadvraag"><input id="layer-pauzelaadvraag" type="checkbox" @bind="ShowRoadBreakDemand" @bind:after="RefreshMapAsync" /> Pauzelaadvraag</label>
+                    <button type="button" class='@LayerInfoButtonClass("pauzelaadvraag")' aria-label="Uitleg over Pauzelaadvraag" aria-expanded='@LayerInfoExpanded("pauzelaadvraag")' aria-controls="layer-info-pauzelaadvraag" @onclick='() => ToggleLayerInfo("pauzelaadvraag")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "pauzelaadvraag")
+                {
+                    <p id="layer-info-pauzelaadvraag" class="layer-info-panel">Wegvlakken waar voertuigen volgens de rijtijd-teller tussen het ingestelde pauzevenster vallen. De kleur en dikte tonen de berekende piekvraag, niet de beschikbare laadcapaciteit.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
                     <label class="toggle layer-toggle-label" for="layer-wegdrukte"><input id="layer-wegdrukte" type="checkbox" @bind="ShowRoadHeat" @bind:after="RefreshMapAsync" /> Wegdrukte</label>
                     <button type="button" class='@LayerInfoButtonClass("wegdrukte")' aria-label="Uitleg over Wegdrukte" aria-expanded='@LayerInfoExpanded("wegdrukte")' aria-controls="layer-info-wegdrukte" @onclick='() => ToggleLayerInfo("wegdrukte")'>i</button>
                 </div>
@@ -141,13 +151,10 @@
         </section>
 
         <section class="filter-grid demand-controls">
-            <label>
-                Min. voertuigen per depot
-                <input type="number" min="1" max="100" step="1" @bind="MinDepotVehicles" />
-            </label>
+            <label class="filter-group-title">Voertuig</label>
             <label>
                 kWh/km
-                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" />
+                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" @bind:after="RefreshMapAsync" />
             </label>
             <label>
                 Batterijcapaciteit (kWh)
@@ -160,23 +167,34 @@
                 <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" />
             </label>
             <label>
+                Rijtijd vanaf (uur)
+                <input type="number" min="0.5" max="12" step="0.25" @bind="BreakWindowStartHours" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
+                Rijtijd tot (uur)
+                <input type="number" min="0.75" max="14" step="0.25" @bind="BreakWindowEndHours" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
+                Pauzeduur (uur)
+                <input type="number" min="0.25" max="3" step="0.25" @bind="BreakDurationHours" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
+                Shift-reset gap (uur)
+                <input type="number" min="0.5" max="12" step="0.25" @bind="ShiftResetGapHours" @bind:after="RefreshMapAsync" />
+            </label>
+            <label class="filter-group-title">Depotselectie</label>
+            <label>
+                Min. voertuigen per depot
+                <input type="number" min="1" max="100" step="1" @bind="MinDepotVehicles" />
+            </label>
+            <label class="filter-group-title">Vereist een publieke laadlocatie</label>
+            <label>
                 Vermogen per stekker (kW)
-                <input type="number" min="50" max="2000" step="50" @bind="ScenarioKwPerPlug" />
+                <input type="number" min="0" max="2000" step="50" @bind="ChargerMinPowerKw" @bind:after="RefreshMapAsync" />
             </label>
             <label>
-                Stekkers
-                <input type="number" min="1" max="100" step="1" @bind="ScenarioPlugs" />
-            </label>
-            <label>
-                Locatielimiet (MW)
-                <input type="number" min="0.05" max="50" step="0.1" @bind="ScenarioSiteLimitMw" />
-            </label>
-        </section>
-
-        <section class="filter-grid charger-controls">
-            <label>
-                Min. vermogen (kW)
-                <input type="number" min="0" max="400" step="50" @bind="ChargerMinPowerKw" @bind:after="RefreshMapAsync" />
+                Min. aantal stekkers
+                <input type="number" min="1" max="100" step="1" @bind="ChargerMinConnectors" @bind:after="RefreshMapAsync" />
             </label>
             <label class="toggle"><input type="checkbox" @bind="ChargerOnlyDedicated" @bind:after="RefreshMapAsync" /> Alleen gereserveerd</label>
             <label class="toggle"><input type="checkbox" @bind="ChargerAccessPublic" @bind:after="RefreshMapAsync" /> Publiek</label>
@@ -524,6 +542,17 @@
                         </div>
                     }
 
+                    @if (!LegendCollapsed && ShowRoadBreakDemand)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-line road-break-demand-line"></span>
+                            <div>
+                                <strong>Pauzelaadvraag</strong>
+                                <span>Oranje/rode wegvlakken met gevraagde piek-MW op basis van rijtijd en pauzeduur.</span>
+                            </div>
+                        </div>
+                    }
+
                     @if (!LegendCollapsed && ShowRoadHeat)
                     {
                         <div class="legend-item heat">
@@ -696,58 +725,116 @@
 
                     <div class="analysis-card">
                         <div class="card-heading">
-                            <strong>Laadprofiel</strong>
-                            <span>@SelectedDetail.Charging.Recommendation</span>
+                            <strong>@(SelectedDetail.SelectionType == "road" ? "Pauze-laadvraag" : "Laadprofiel")</strong>
+                            <span>@(SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null ? $"{SelectedRoadBreakDemand.Passages:N0} passages · piek {SelectedRoadBreakDemand.PeakMw:N2} MW" : SelectedDetail.Charging.Recommendation)</span>
                         </div>
-                        <div class="window-list">
-                            @foreach (var window in SelectedDetail.Charging.BusyWindows)
-                            {
-                                <div class="window-row">
-                                    <strong>@window.TimeSlot</strong>
-                                    <span>@window.DemandKwh.ToString("N0") kWh nodig</span>
-                                    <span>@window.ShortageKwh.ToString("N0") kWh publieke laadvraag</span>
-                                    <span>@window.RequiredMw.ToString("N2") MW</span>
-                                </div>
-                            }
-                        </div>
+                        @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
+                        {
+                            <div class="window-list">
+                                @foreach (var slot in SelectedRoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
+                                {
+                                    <div class="window-row">
+                                        <strong>@slot.Label</strong>
+                                        <span>@slot.DemandKwh.ToString("N0") kWh gevraagd</span>
+                                        <span>@slot.Vehicles.ToString("N0") voertuigen</span>
+                                        <span>@slot.RequiredMw.ToString("N2") MW</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="window-list">
+                                @foreach (var window in SelectedDetail.Charging.BusyWindows)
+                                {
+                                    <div class="window-row">
+                                        <strong>@window.TimeSlot</strong>
+                                        <span>@window.DemandKwh.ToString("N0") kWh nodig</span>
+                                        <span>@window.ShortageKwh.ToString("N0") kWh publieke laadvraag</span>
+                                        <span>@window.RequiredMw.ToString("N2") MW</span>
+                                    </div>
+                                }
+                            </div>
+                        }
                     </div>
                 </div>
 
-                <div class="table-panel nested-table">
-                    <div class="panel-heading">
-                        <h3>Voertuigen in selectie</h3>
-                        <span>@SelectedDetail.Vehicles.Length voertuigen</span>
-                    </div>
-                    <div class="table-scroll">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Kenteken(s)</th>
-                                    <th>Voertuigcode</th>
-                                    <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
-                                    <th>Km/dag</th>
-                                    <th>kWh/dag</th>
-                                    <th>Uren op locatie</th>
-                                    <th>Benodigd kW</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var row in SelectedDetail.Vehicles.Take(20))
-                                {
+                @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
+                {
+                    <div class="table-panel nested-table">
+                        <div class="panel-heading">
+                            <h3>Voertuigen in pauzevenster</h3>
+                            <span>@SelectedRoadBreakDemand.VehiclesInWindow.Length voertuigen</span>
+                        </div>
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <td><strong>@row.Kentekens</strong></td>
-                                        <td>@row.Wagencode</td>
-                                        <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
-                                        <td>@row.AvgDayKm.ToString("N0")</td>
-                                        <td>@row.AvgKwhPerDay.ToString("N0")</td>
-                                        <td>@row.AvgStandingHours.ToString("N1")</td>
-                                        <td>@row.RequiredKw.ToString("N0")</td>
+                                        <th>Kenteken</th>
+                                        <th>Voertuigcode</th>
+                                        <th>Pauzemoment</th>
+                                        <th>Rijtijd</th>
+                                        <th>Km sinds shift</th>
+                                        <th>kWh</th>
+                                        <th>Benodigd kW</th>
                                     </tr>
-                                }
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in SelectedRoadBreakDemand.VehiclesInWindow.Take(40))
+                                    {
+                                        <tr>
+                                            <td><strong>@row.Kenteken</strong></td>
+                                            <td>@row.Wagencode</td>
+                                            <td>@row.BreakStart.ToString("dd-MM HH:mm")</td>
+                                            <td>@row.DriveHoursSinceShiftStart.ToString("N2")</td>
+                                            <td>@row.KmSinceShiftStart.ToString("N0")</td>
+                                            <td>@row.DemandKwh.ToString("N0")</td>
+                                            <td>@row.RequiredKw.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
+                }
+                else
+                {
+                    <div class="table-panel nested-table">
+                        <div class="panel-heading">
+                            <h3>Voertuigen in selectie</h3>
+                            <span>@SelectedDetail.Vehicles.Length voertuigen</span>
+                        </div>
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Kenteken(s)</th>
+                                        <th>Voertuigcode</th>
+                                        <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
+                                        <th>Km/dag</th>
+                                        <th>kWh/dag</th>
+                                        <th>Uren op locatie</th>
+                                        <th>Benodigd kW</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in SelectedDetail.Vehicles.Take(20))
+                                    {
+                                        <tr>
+                                            <td><strong>@row.Kentekens</strong></td>
+                                            <td>@row.Wagencode</td>
+                                            <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
+                                            <td>@row.AvgDayKm.ToString("N0")</td>
+                                            <td>@row.AvgKwhPerDay.ToString("N0")</td>
+                                            <td>@row.AvgStandingHours.ToString("N1")</td>
+                                            <td>@row.RequiredKw.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
             </section>
         }
 
@@ -890,6 +977,7 @@
     private DashboardResponse? Dashboard { get; set; }
     private SimulationResponse? Simulation { get; set; }
     private SelectionDetailResponse? SelectedDetail { get; set; }
+    private RoadBreakDemandDetailResponse? SelectedRoadBreakDemand { get; set; }
     private PowerProfileResponse? PowerProfiles { get; set; }
     private PowerLocationProfileResponse? SelectedPowerProfile { get; set; }
     private PowerDiagnosticsResponse? PowerDiagnostics { get; set; }
@@ -919,6 +1007,7 @@
     private bool ShowStopHeat { get; set; } = true;
     private bool ShowMarkers { get; set; } = true;
     private bool ShowRoads { get; set; }
+    private bool ShowRoadBreakDemand { get; set; }
     private bool ShowRoadHeat { get; set; }
     private bool ShowOvernight { get; set; } = true;
     private bool ShowStandplaatsen { get; set; }
@@ -927,11 +1016,13 @@
     private double ScenarioKwhPerKm { get; set; } = 1.2;
     private double ScenarioCapacityKwh { get; set; } = 590;
     private bool ScenarioMcsEnabled { get; set; }
-    private double ScenarioTargetSocPct { get; set; } = 80;
-    private double ScenarioKwPerPlug { get; set; } = 350;
-    private int ScenarioPlugs { get; set; } = 4;
-    private double ScenarioSiteLimitMw { get; set; } = 1.4;
-    private double ChargerMinPowerKw { get; set; } = 150;
+    private double ScenarioTargetSocPct { get; set; } = 100;
+    private double BreakWindowStartHours { get; set; } = 3.5;
+    private double BreakWindowEndHours { get; set; } = 4.5;
+    private double BreakDurationHours { get; set; } = 0.75;
+    private double ShiftResetGapHours { get; set; } = 2.0;
+    private double ChargerMinPowerKw { get; set; } = 350;
+    private int ChargerMinConnectors { get; set; } = 1;
     private bool ChargerOnlyDedicated { get; set; }
     private bool ChargerAccessPublic { get; set; } = true;
     private bool ChargerAccessSemiPublic { get; set; } = true;
@@ -1003,6 +1094,7 @@
         SelectedDepotId = null;
         SelectedRoad = null;
         SelectedStopLocation = null;
+        SelectedRoadBreakDemand = null;
         PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
@@ -1138,11 +1230,12 @@
             return;
         }
 
-        await JS.InvokeVoidAsync("routePlannerMap.update", BuildFilter(), BuildChargerFilter(), BuildOvernightFilter(), new
+        await JS.InvokeVoidAsync("routePlannerMap.update", BuildFilter(), BuildChargerFilter(), BuildOvernightFilter(), BuildRoadBreakDemandFilter(), new
         {
             showStopHeat = ShowStopHeat,
             showMarkers = ShowMarkers,
             showRoads = ShowRoads,
+            showRoadBreakDemand = ShowRoadBreakDemand,
             showRoadHeat = ShowRoadHeat,
             showOvernight = ShowOvernight,
             showStandplaatsen = ShowStandplaatsen,
@@ -1193,6 +1286,7 @@
         return new ChargerFilter
         {
             MinPowerKw = ChargerMinPowerKw,
+            MinConnectors = ChargerMinConnectors,
             OnlyDedicated = ChargerOnlyDedicated,
             Access = access.ToArray(),
         };
@@ -1217,6 +1311,52 @@
         };
     }
 
+    private RoadBreakDemandRequest BuildRoadBreakDemandFilter()
+    {
+        var filter = BuildFilter();
+        return new RoadBreakDemandRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            RoadThreshold = filter.RoadThreshold,
+            RoadTopPercent = filter.RoadTopPercent,
+            MarkerTopN = filter.MarkerTopN,
+            ZeZoneMode = filter.ZeZoneMode,
+            KwhPerKm = ScenarioKwhPerKm,
+            WindowStartHours = BreakWindowStartHours,
+            WindowEndHours = BreakWindowEndHours,
+            BreakDurationHours = BreakDurationHours,
+            ShiftResetGapHours = ShiftResetGapHours
+        };
+    }
+
+    private RoadBreakDemandDetailRequest BuildRoadBreakDemandDetailRequest(AnalysisFilter filter, RoadSelection road)
+    {
+        return new RoadBreakDemandDetailRequest
+        {
+            DateFrom = filter.DateFrom,
+            DateTo = filter.DateTo,
+            VervoerderTypes = filter.VervoerderTypes,
+            Vervoerders = filter.Vervoerders,
+            Wagencodes = filter.Wagencodes,
+            MinDwellMin = filter.MinDwellMin,
+            RoadThreshold = filter.RoadThreshold,
+            RoadTopPercent = filter.RoadTopPercent,
+            MarkerTopN = filter.MarkerTopN,
+            ZeZoneMode = filter.ZeZoneMode,
+            KwhPerKm = ScenarioKwhPerKm,
+            WindowStartHours = BreakWindowStartHours,
+            WindowEndHours = BreakWindowEndHours,
+            BreakDurationHours = BreakDurationHours,
+            ShiftResetGapHours = ShiftResetGapHours,
+            Road = road
+        };
+    }
+
     private ChargingScenario BuildScenario()
     {
         return new ChargingScenario
@@ -1225,9 +1365,9 @@
             CapacityKwh = ScenarioCapacityKwh,
             MinSocPct = 15,
             TargetSocPct = ScenarioTargetSocPct,
-            KwPerPlug = ScenarioKwPerPlug,
-            Plugs = ScenarioPlugs,
-            SiteLimitMw = ScenarioSiteLimitMw
+            KwPerPlug = 2000,
+            Plugs = 100,
+            SiteLimitMw = 50
         };
     }
 
@@ -1236,6 +1376,7 @@
     {
         SelectedDepotId = depotId;
         SelectedRoad = null;
+        SelectedRoadBreakDemand = null;
         SelectedStopLocation = null;
         PendingSelectionScroll = false;
         SelectedDemandDay = null;
@@ -1258,6 +1399,7 @@
         };
         SelectedDepotId = null;
         SelectedRoad = null;
+        SelectedRoadBreakDemand = null;
         PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
@@ -1273,6 +1415,7 @@
         SelectedRoad = new RoadSelection(lat1, lon1, lat2, lon2, radiusKm);
         SelectedDepotId = null;
         SelectedStopLocation = null;
+        SelectedRoadBreakDemand = null;
         PendingSelectionScroll = true;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
@@ -1350,6 +1493,7 @@
                     Road = SelectedRoad,
                     Scenario = BuildScenario()
                 });
+                SelectedRoadBreakDemand = await Analysis.GetRoadBreakDemandDetailAsync(BuildRoadBreakDemandDetailRequest(filter, SelectedRoad));
             }
 
             if (MapReady && SelectedDetail is not null && SelectedDetail.SelectionType == "stop")

@@ -25,7 +25,8 @@ public sealed record SimulationRequest : AnalysisFilter
 
 public sealed record ChargerFilter
 {
-    public double MinPowerKw { get; init; } = 150;
+    public double MinPowerKw { get; init; } = 350;
+    public int MinConnectors { get; init; } = 1;
     public bool OnlyDedicated { get; init; }
     public string[] Access { get; init; } = ["Publiek", "Semi-publiek"];
 }

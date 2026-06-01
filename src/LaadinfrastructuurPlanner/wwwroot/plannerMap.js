@@ -74,6 +74,35 @@ window.routePlannerMap = (() => {
     };
   }
 
+  function roadBreakDemandCollection(lines) {
+    return {
+      type: "FeatureCollection",
+      features: (lines || []).map((line) => ({
+        type: "Feature",
+        properties: {
+          segmentId: line.segmentId || "",
+          weight: line.peakMw || 0,
+          peakMw: line.peakMw || 0,
+          totalKwh: line.totalKwh || 0,
+          vehicles: line.vehicles || 0,
+          passages: line.passages || 0,
+          direction: line.direction || "",
+          routeQuality: line.routeQuality || "",
+          radiusKm: line.selectionRadiusKm || 3
+        },
+        geometry: {
+          type: "LineString",
+          coordinates: line.coordinates?.length
+            ? line.coordinates.map((point) => [point.lon, point.lat])
+            : [
+                [line.lon1, line.lat1],
+                [line.lon2, line.lat2]
+              ]
+        }
+      }))
+    };
+  }
+
   function chargerCollection(chargers) {
     return {
       type: "FeatureCollection",
@@ -140,6 +169,7 @@ window.routePlannerMap = (() => {
     ensureSource("stop-markers");
     ensureSource("road-lines");
     ensureSource("road-selection");
+    ensureSource("road-break-demand");
     ensureSource("road-heat");
     ensureSource("overnight-locations");
     ensureSource("fleet-standplaatsen");
@@ -298,6 +328,25 @@ window.routePlannerMap = (() => {
 
     if (map.getLayer("road-selection") && map.getLayer("road-lines-hitbox")) {
       map.moveLayer("road-selection", "road-lines-hitbox");
+    }
+
+    if (!map.getLayer("road-break-demand")) {
+      map.addLayer({
+        id: "road-break-demand",
+        type: "line",
+        source: "road-break-demand",
+        paint: {
+          "line-color": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, "#fde68a", 1, "#f97316", 4, "#b91c1c"],
+          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 2, 1, 5, 4, 9],
+          "line-opacity": 0.9
+        }
+      });
+
+      map.on("click", "road-break-demand", (event) => {
+        selectRoadFeature(event.features?.[0]);
+      });
+      map.on("mouseenter", "road-break-demand", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "road-break-demand", () => { map.getCanvas().style.cursor = ""; });
     }
 
     if (!map.getLayer("stop-markers")) {
@@ -513,10 +562,10 @@ window.routePlannerMap = (() => {
       map.on("load", addLayers);
     },
 
-    update: async (filter, chargerFilter, overnightFilter, options) => {
+    update: async (filter, chargerFilter, overnightFilter, breakDemandFilter, options) => {
       if (!map) return;
       if (!isStyleReady()) {
-        window.setTimeout(() => window.routePlannerMap.update(filter, chargerFilter, overnightFilter, options), 100);
+        window.setTimeout(() => window.routePlannerMap.update(filter, chargerFilter, overnightFilter, breakDemandFilter, options), 100);
         return;
       }
       addLayers();
@@ -531,6 +580,9 @@ window.routePlannerMap = (() => {
         const roadsPromise = options.showRoads || options.showRoadHeat
           ? postJson("map/roads", filter, signal)
           : Promise.resolve({ status: "skipped", lines: [], heatPoints: [] });
+        const breakDemandPromise = options.showRoadBreakDemand
+          ? postJson("roads/break-demand", breakDemandFilter, signal)
+          : Promise.resolve({ status: "skipped", lines: [] });
         const chargersPromise = options.showChargers
           ? postJson("map/chargers", chargerFilter, signal)
           : Promise.resolve({ status: "skipped", markers: [] });
@@ -540,11 +592,12 @@ window.routePlannerMap = (() => {
         const standplaatsenPromise = options.showStandplaatsen
           ? fetch(apiUrl("fleet/standplaatsen"), { signal }).then((r) => r.ok ? r.json() : { status: "error", depots: [] })
           : Promise.resolve({ status: "skipped", depots: [] });
-        const [stops, roads, chargers, overnight, standplaatsen] = await Promise.all([stopsPromise, roadsPromise, chargersPromise, overnightPromise, standplaatsenPromise]);
+        const [stops, roads, breakDemand, chargers, overnight, standplaatsen] = await Promise.all([stopsPromise, roadsPromise, breakDemandPromise, chargersPromise, overnightPromise, standplaatsenPromise]);
 
         setData("stop-heat", featureCollection(stops.heatPoints));
         setData("stop-markers", featureCollection(stops.markers, true));
         setData("road-lines", lineCollection(roads.lines));
+        setData("road-break-demand", roadBreakDemandCollection(breakDemand.lines));
         setData("road-heat", featureCollection(roads.heatPoints));
         setData("chargers", chargerCollection(chargers.markers));
         setData("overnight-locations", overnightCollection(overnight.locations));
@@ -555,6 +608,7 @@ window.routePlannerMap = (() => {
         setVisibility("road-lines", !!options.showRoads && roads.status === "ok");
         setVisibility("road-selection", !!options.showRoads && roads.status === "ok");
         setVisibility("road-lines-hitbox", !!options.showRoads && roads.status === "ok");
+        setVisibility("road-break-demand", !!options.showRoadBreakDemand && breakDemand.status === "ok");
         setVisibility("road-heat", !!options.showRoadHeat && roads.status === "ok");
         setVisibility("chargers", !!options.showChargers && chargers.status === "ok");
         setVisibility("overnight-locations", !!options.showOvernight && overnight.status === "ok");
@@ -568,11 +622,13 @@ window.routePlannerMap = (() => {
 
         const notes = [];
         if (options.showRoads && roads.status === "ok") notes.push(`${roads.lines?.length || 0} wegvlakken`);
+        if (options.showRoadBreakDemand && breakDemand.status === "ok") notes.push(`${breakDemand.lines?.length || 0} pauzelaadvraag-wegvlakken`);
         if (options.showRoadHeat && roads.status === "ok") notes.push(`${roads.heatPoints?.length || 0} wegdruktepunten`);
         if (options.showChargers && chargers.status === "ok") notes.push(`${chargers.markers?.length || 0} laders`);
         if (options.showOvernight && overnight.status === "ok") notes.push(`${overnight.locations?.length || 0} vaste stilstandlocaties`);
         if (options.showStandplaatsen && standplaatsen.status === "ok") notes.push(`${standplaatsen.depots?.length || 0} standplaatsen`);
         if (roads.status === "cache_missing") notes.push("weglaag niet beschikbaar");
+        if (options.showRoadBreakDemand && breakDemand.status === "cache_missing") notes.push("pauzelaadvraag niet beschikbaar");
         if (options.showChargers && chargers.status === "cache_missing") notes.push("laadlocaties niet beschikbaar");
         if (options.showOvernight && overnight.status !== "ok") notes.push("vaste stilstandlocaties niet beschikbaar");
         if (options.showStandplaatsen && standplaatsen.status !== "ok") notes.push("standplaatsen niet beschikbaar");
