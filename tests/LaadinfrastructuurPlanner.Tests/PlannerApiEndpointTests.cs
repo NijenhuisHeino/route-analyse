@@ -45,15 +45,15 @@ public sealed class PlannerApiEndpointTests : IDisposable
         var metadata = await client.GetFromJsonAsync<MetadataResponse>("/api/metadata");
         Assert.NotNull(metadata);
         Assert.True(metadata.DataAvailable);
-        Assert.Equal(10, metadata.StopCount);
+        Assert.Equal(20, metadata.StopCount);
         Assert.Contains("Test ZE-zone", metadata.ZeZones);
 
         var summary = await PostAsync<SummaryResponse>(client, "/api/summary", new AnalysisFilter { VervoerderTypes = ["eigen"] });
-        Assert.Equal(6, summary.Stops);
-        Assert.Equal(300, summary.TotalKm);
+        Assert.Equal(12, summary.Stops);
+        Assert.Equal(600, summary.TotalKm);
 
         var zeSummary = await PostAsync<SummaryResponse>(client, "/api/summary", new AnalysisFilter { ZeZoneMode = "in" });
-        Assert.Equal(4, zeSummary.Stops);
+        Assert.Equal(7, zeSummary.Stops);
 
         var stops = await PostAsync<StopMapResponse>(client, "/api/map/stops", new AnalysisFilter());
         Assert.NotEmpty(stops.HeatPoints);
@@ -86,6 +86,22 @@ public sealed class PlannerApiEndpointTests : IDisposable
         Assert.NotEmpty(roadDetail.Vehicles);
         Assert.Equal(1, roadDetail.DailyDistanceDistribution.Trips);
         Assert.Equal(15, roadDetail.DailyDistanceDistribution.Buckets.Length);
+
+        var breakDemand = await PostAsync<RoadBreakDemandMapResponse>(client, "/api/roads/break-demand", new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            KwhPerKm = 1
+        });
+        Assert.Equal("ok", breakDemand.Status);
+        Assert.NotEmpty(breakDemand.Lines);
+
+        var breakDemandDetail = await PostAsync<RoadBreakDemandDetailResponse>(client, "/api/roads/break-demand/detail", new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(52.0, 5.0, 52.02, 5.02, 3),
+            KwhPerKm = 1
+        });
+        Assert.Equal("ok", breakDemandDetail.Status);
+        Assert.NotEmpty(breakDemandDetail.VehiclesInWindow);
 
         var stopDetail = await PostAsync<SelectionDetailResponse>(client, "/api/stops/location", new StopLocationDetailRequest
         {

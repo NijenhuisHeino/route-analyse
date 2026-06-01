@@ -606,7 +606,7 @@ window.routePlannerMap = (() => {
         setVisibility("stop-heat", !!options.showStopHeat);
         setVisibility("stop-markers", !!options.showMarkers);
         setVisibility("road-lines", !!options.showRoads && roads.status === "ok");
-        setVisibility("road-selection", !!options.showRoads && roads.status === "ok");
+        setVisibility("road-selection", (!!options.showRoads && roads.status === "ok") || (!!options.showRoadBreakDemand && breakDemand.status === "ok"));
         setVisibility("road-lines-hitbox", !!options.showRoads && roads.status === "ok");
         setVisibility("road-break-demand", !!options.showRoadBreakDemand && breakDemand.status === "ok");
         setVisibility("road-heat", !!options.showRoadHeat && roads.status === "ok");

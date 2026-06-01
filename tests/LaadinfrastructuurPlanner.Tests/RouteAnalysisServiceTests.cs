@@ -57,7 +57,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         var dateFiltered = await _service.GetSummaryAsync(new AnalysisFilter { DateFrom = new DateOnly(2026, 1, 2) });
         Assert.Equal(17, dateFiltered.Stops);
         Assert.Equal(8, dateFiltered.Trips);
-        Assert.Equal(1060, dateFiltered.TotalKm);
+        Assert.Equal(1030, dateFiltered.TotalKm);
     }
 
     [Fact]

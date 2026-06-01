@@ -797,44 +797,42 @@
                         </div>
                     </div>
                 }
-                else
-                {
-                    <div class="table-panel nested-table">
-                        <div class="panel-heading">
-                            <h3>Voertuigen in selectie</h3>
-                            <span>@SelectedDetail.Vehicles.Length voertuigen</span>
-                        </div>
-                        <div class="table-scroll">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Kenteken(s)</th>
-                                        <th>Voertuigcode</th>
-                                        <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
-                                        <th>Km/dag</th>
-                                        <th>kWh/dag</th>
-                                        <th>Uren op locatie</th>
-                                        <th>Benodigd kW</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var row in SelectedDetail.Vehicles.Take(20))
-                                    {
-                                        <tr>
-                                            <td><strong>@row.Kentekens</strong></td>
-                                            <td>@row.Wagencode</td>
-                                            <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
-                                            <td>@row.AvgDayKm.ToString("N0")</td>
-                                            <td>@row.AvgKwhPerDay.ToString("N0")</td>
-                                            <td>@row.AvgStandingHours.ToString("N1")</td>
-                                            <td>@row.RequiredKw.ToString("N0")</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
+
+                <div class="table-panel nested-table">
+                    <div class="panel-heading">
+                        <h3>Voertuigen in selectie</h3>
+                        <span>@SelectedDetail.Vehicles.Length voertuigen</span>
                     </div>
-                }
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Kenteken(s)</th>
+                                    <th>Voertuigcode</th>
+                                    <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
+                                    <th>Km/dag</th>
+                                    <th>kWh/dag</th>
+                                    <th>Uren op locatie</th>
+                                    <th>Benodigd kW</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in SelectedDetail.Vehicles.Take(20))
+                                {
+                                    <tr>
+                                        <td><strong>@row.Kentekens</strong></td>
+                                        <td>@row.Wagencode</td>
+                                        <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
+                                        <td>@row.AvgDayKm.ToString("N0")</td>
+                                        <td>@row.AvgKwhPerDay.ToString("N0")</td>
+                                        <td>@row.AvgStandingHours.ToString("N1")</td>
+                                        <td>@row.RequiredKw.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </section>
         }
 
