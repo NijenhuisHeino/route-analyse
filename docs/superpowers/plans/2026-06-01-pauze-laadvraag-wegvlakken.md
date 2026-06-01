@@ -560,7 +560,7 @@ private static IEnumerable<RoadBreakEvent> BuildRoadBreakEvents(IReadOnlyList<Ro
 }
 ```
 
-Add `Lerp`, `DistanceKm`, `ShouldResetShift`, `ResetLocation`, and `BuildResetLocations` as private helpers. `BuildResetLocations` groups trip starts and ends rounded to 3 decimals. Use thresholds `5` unique vehicles or `20` events when the input has at least `30` trips. Use thresholds `1` unique vehicle or `2` events when the input has fewer than `30` trips so the synthetic tests can exercise reset behavior.
+Add `Lerp`, `DistanceKm`, `ShouldResetShift`, `ResetLocation`, and `BuildResetLocations` as private helpers. `BuildResetLocations` groups trip starts and ends rounded to 3 decimals. Use thresholds `5` unique vehicles or `20` events when the input has at least `30` trips. Use a lower small-dataset threshold of `3` events when the input has fewer than `30` trips so the synthetic depot reset is exercised without turning a single customer handoff into a reset location.
 
 - [ ] **Step 4: Implement line aggregation and quarter profile**
 
