@@ -286,6 +286,38 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandCarriesDriveTimeAcrossTripsInSameShift()
+    {
+        var demand = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            KwhPerKm = 1.0,
+            WindowStartHours = 3.5,
+            WindowEndHours = 4.5,
+            BreakDurationHours = 0.75,
+            ShiftResetGapHours = 2.0
+        });
+
+        Assert.Contains(demand.Lines, line => line.Passages > 0 && line.TotalKwh > 0 && line.PeakMw > 0);
+        Assert.Contains(demand.Diagnostics.ExclusionReasons, reason => reason.Contains("included", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task RoadBreakDemandResetsOnlyAfterLongGapAtResetLocation()
+    {
+        var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(52.0, 5.0, 52.02, 5.02, 100),
+            KwhPerKm = 1.0,
+            ShiftResetGapHours = 2.0
+        });
+
+        Assert.Equal("ok", detail.Status);
+        Assert.All(detail.VehiclesInWindow, row => Assert.InRange(row.DriveHoursSinceShiftStart, 3.5, 4.5));
+        Assert.DoesNotContain(detail.VehiclesInWindow, row => row.Wagencode == "W3" && row.KmSinceShiftStart > 500);
+    }
+
+    [Fact]
     public async Task WarmApiCallsStayUnderTwoSecondsOnSyntheticCache()
     {
         var filter = new AnalysisFilter { RoadThreshold = 1 };
