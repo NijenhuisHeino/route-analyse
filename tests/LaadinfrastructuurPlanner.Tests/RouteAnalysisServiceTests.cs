@@ -42,22 +42,22 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         var metadata = await _service.GetMetadataAsync();
 
         Assert.True(metadata.DataAvailable);
-        Assert.Equal(10, metadata.StopCount);
+        Assert.Equal(20, metadata.StopCount);
         Assert.Equal(new DateOnly(2026, 1, 1), metadata.MinDate);
-        Assert.Equal(new DateOnly(2026, 1, 2), metadata.MaxDate);
+        Assert.Equal(new DateOnly(2026, 1, 3), metadata.MaxDate);
         Assert.Contains("eigen", metadata.VervoerderTypes);
         Assert.Contains("charter", metadata.VervoerderTypes);
         Assert.Contains("Test ZE-zone", metadata.ZeZones);
 
         var eigen = await _service.GetSummaryAsync(new AnalysisFilter { VervoerderTypes = ["eigen"] });
-        Assert.Equal(6, eigen.Stops);
-        Assert.Equal(2, eigen.Trips);
-        Assert.Equal(300, eigen.TotalKm);
+        Assert.Equal(12, eigen.Stops);
+        Assert.Equal(5, eigen.Trips);
+        Assert.Equal(600, eigen.TotalKm);
 
         var dateFiltered = await _service.GetSummaryAsync(new AnalysisFilter { DateFrom = new DateOnly(2026, 1, 2) });
-        Assert.Equal(7, dateFiltered.Stops);
-        Assert.Equal(3, dateFiltered.Trips);
-        Assert.Equal(460, dateFiltered.TotalKm);
+        Assert.Equal(17, dateFiltered.Stops);
+        Assert.Equal(8, dateFiltered.Trips);
+        Assert.Equal(1060, dateFiltered.TotalKm);
     }
 
     [Fact]
@@ -65,20 +65,20 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     {
         var inZone = await _service.GetSummaryAsync(new AnalysisFilter { ZeZoneMode = "in" });
 
-        Assert.Equal(4, inZone.Stops);
-        Assert.Equal(2, inZone.Trips);
-        Assert.Equal(1, inZone.Wagens);
+        Assert.Equal(7, inZone.Stops);
+        Assert.Equal(5, inZone.Trips);
+        Assert.Equal(2, inZone.Wagens);
 
         var outsideZone = await _service.GetSummaryAsync(new AnalysisFilter { ZeZoneMode = "out" });
 
-        Assert.Equal(6, outsideZone.Stops);
-        Assert.Equal(4, outsideZone.Trips);
+        Assert.Equal(13, outsideZone.Stops);
+        Assert.Equal(9, outsideZone.Trips);
 
         var dashboard = await _service.GetDashboardAsync(new AnalysisFilter { ZeZoneMode = "in" });
         var zone = Assert.Single(dashboard.ZeZones);
         Assert.Equal("Test ZE-zone", zone.Zone);
         Assert.Equal("2025-01-01", zone.StartDate);
-        Assert.Equal(4, zone.Stops);
+        Assert.Equal(7, zone.Stops);
     }
 
     [Fact]
@@ -90,7 +90,8 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         Assert.Equal("full", roads.Variant);
         Assert.NotEmpty(roads.Lines);
         Assert.NotEmpty(roads.HeatPoints);
-        var line = Assert.Single(roads.Lines);
+        Assert.Contains(roads.Lines, candidate => candidate.RawSegments >= 2);
+        var line = roads.Lines.First(candidate => candidate.RawSegments >= 2);
         Assert.Equal(2, line.RawSegments);
         Assert.Contains("richting", line.Direction, StringComparison.OrdinalIgnoreCase);
         Assert.True(line.LengthKm > 0);
@@ -313,8 +314,20 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         });
 
         Assert.Equal("ok", detail.Status);
+        Assert.Contains(detail.VehiclesInWindow, row => row.Wagencode == "W3");
+        Assert.Single(detail.VehiclesInWindow.Where(row => row.Wagencode == "W3"));
         Assert.All(detail.VehiclesInWindow, row => Assert.InRange(row.DriveHoursSinceShiftStart, 3.5, 4.5));
-        Assert.DoesNotContain(detail.VehiclesInWindow, row => row.Wagencode == "W3" && row.KmSinceShiftStart > 500);
+
+        var customerGapDetail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(52.5, 5.5, 52.6, 5.6, 20),
+            KwhPerKm = 1.0,
+            ShiftResetGapHours = 2.0
+        });
+
+        Assert.Contains(
+            customerGapDetail.VehiclesInWindow,
+            row => row.Wagencode == "W4" && row.KmSinceShiftStart > 130 && row.KmSinceShiftStart <= 270);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ internal static class TestParquetData
                 ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T5', 0, 'Origin', 'Depot A', 'Adres A 1234 AB', TIMESTAMP '2026-01-03 06:00:00', TIMESTAMP '2026-01-03 06:00:00', 0.0, 100.0, 5.0, 52.000, 5.000),
                 ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T5', 1, 'Destination', 'Hub B', 'Adres B', TIMESTAMP '2026-01-03 08:00:00', TIMESTAMP '2026-01-03 08:00:00', 100.0, 100.0, 15.0, 52.010, 5.010),
                 ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T6', 0, 'Origin', 'Hub B', 'Adres B', TIMESTAMP '2026-01-03 08:20:00', TIMESTAMP '2026-01-03 08:20:00', 0.0, 110.0, 5.0, 52.010, 5.010),
-                ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T6', 1, 'Destination', 'Depot A', 'Adres A 1234 AB', TIMESTAMP '2026-01-03 10:30:00', TIMESTAMP '2026-01-03 10:30:00', 110.0, 110.0, 15.0, 52.020, 5.020),
+                ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T6', 1, 'Destination', 'Depot A', 'Adres A 1234 AB', TIMESTAMP '2026-01-03 10:30:00', TIMESTAMP '2026-01-03 10:30:00', 110.0, 110.0, 15.0, 52.000, 5.000),
                 ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T7', 0, 'Origin', 'Depot A', 'Adres A 1234 AB', TIMESTAMP '2026-01-03 13:00:00', TIMESTAMP '2026-01-03 13:00:00', 0.0, 90.0, 5.0, 52.000, 5.000),
                 ('W3', 'Eigen vervoer', 'eigen', DATE '2026-01-03', 'T7', 1, 'Destination', 'Hub B', 'Adres B', TIMESTAMP '2026-01-03 14:30:00', TIMESTAMP '2026-01-03 14:30:00', 90.0, 90.0, 15.0, 52.010, 5.010),
                 ('W4', 'Charter', 'charter', DATE '2026-01-03', 'T8', 0, 'Origin', 'Klant X', 'Adres X', TIMESTAMP '2026-01-03 06:00:00', TIMESTAMP '2026-01-03 06:00:00', 0.0, 130.0, 5.0, 52.500, 5.500),
@@ -57,7 +57,7 @@ internal static class TestParquetData
                 VALUES
                 (52.000, 5.000, 52.010, 5.010, 3, 7),
                 (52.010, 5.010, 52.020, 5.020, 2, 5),
-                (52.000, 5.000, 52.020, 5.020, 1, 2),
+                (52.010, 5.010, 52.000, 5.000, 1, 2),
                 (52.500, 5.500, 52.600, 5.600, 1, 2)
             ) AS t(lat1, lon1, lat2, lon2, n_wagens, n_passes);
             CREATE TABLE heat AS
