@@ -140,6 +140,16 @@
             </div>
             <div class="layer-toggle-item">
                 <div class="layer-toggle-row">
+                    <label class="toggle layer-toggle-label" for="layer-charter-standplaatsen"><input id="layer-charter-standplaatsen" type="checkbox" @bind="ShowCharterStandplaatsen" @bind:after="RefreshMapAsync" /> Charterstandplaatsen</label>
+                    <button type="button" class='@LayerInfoButtonClass("charter-standplaatsen")' aria-label="Uitleg over Charterstandplaatsen" aria-expanded='@LayerInfoExpanded("charter-standplaatsen")' aria-controls="layer-info-charter-standplaatsen" @onclick='() => ToggleLayerInfo("charter-standplaatsen")'>i</button>
+                </div>
+                @if (OpenLayerInfoId == "charter-standplaatsen")
+                {
+                    <p id="layer-info-charter-standplaatsen" class="layer-info-panel disclaimer">Fysieke standplaatsen van charters uit de aparte charter-Excel. Deze locaties zijn bedoeld als verwachte shift-startpunten waar charters met minimaal 90% state of charge vertrekken.</p>
+                }
+            </div>
+            <div class="layer-toggle-item">
+                <div class="layer-toggle-row">
                     <label class="toggle layer-toggle-label" for="layer-laadlocaties"><input id="layer-laadlocaties" type="checkbox" @bind="ShowChargers" @bind:after="RefreshMapAsync" /> Laadlocaties</label>
                     <button type="button" class='@LayerInfoButtonClass("laadlocaties")' aria-label="Uitleg over Laadlocaties" aria-expanded='@LayerInfoExpanded("laadlocaties")' aria-controls="layer-info-laadlocaties" @onclick='() => ToggleLayerInfo("laadlocaties")'>i</button>
                 </div>
@@ -541,6 +551,17 @@
                             <div>
                                 <strong>Standplaatsen (wagenpark)</strong>
                                 <span>Donkerblauwe rondjes met witte rand; groter betekent meer voertuigen op die standplaats. Klik voor voertuigenlijst.</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!LegendCollapsed && ShowCharterStandplaatsen)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-symbol charter-standplaats-marker"></span>
+                            <div>
+                                <strong>Charterstandplaatsen</strong>
+                                <span>Paarse rondjes met witte rand; groter betekent meer chartervoertuigen.</span>
                             </div>
                         </div>
                     }
@@ -1023,6 +1044,7 @@
     private bool ShowRoadHeat { get; set; }
     private bool ShowOvernight { get; set; } = true;
     private bool ShowStandplaatsen { get; set; }
+    private bool ShowCharterStandplaatsen { get; set; }
     private bool ShowChargers { get; set; } = true;
     private int MinDepotVehicles { get; set; } = 5;
     private double ScenarioKwhPerKm { get; set; } = 1.2;
@@ -1270,6 +1292,7 @@
             showRoadHeat = ShowRoadHeat,
             showOvernight = ShowOvernight,
             showStandplaatsen = ShowStandplaatsen,
+            showCharterStandplaatsen = ShowCharterStandplaatsen,
             showChargers = ShowChargers
         });
     }

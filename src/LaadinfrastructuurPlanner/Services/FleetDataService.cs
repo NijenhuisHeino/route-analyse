@@ -26,6 +26,7 @@ public sealed class FleetDataService
     private readonly SemaphoreSlim _geocodeLock = new(1, 1);
 
     private FleetData? _data;
+    private FleetData? _charterData;
     private Dictionary<string, GeocodeEntry> _geocodeCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _geocodeLoaded;
 
@@ -43,7 +44,7 @@ public sealed class FleetDataService
 
     public async Task<FleetDepotsResponse> GetDepotsAsync(CancellationToken cancellationToken)
     {
-        var data = await EnsureLoadedAsync(cancellationToken);
+        var data = await EnsureLoadedAsync(FleetDataset.PostNl, cancellationToken);
         if (data is null)
         {
             return new FleetDepotsResponse(
@@ -55,7 +56,35 @@ public sealed class FleetDataService
                 []);
         }
 
-        var geocode = await EnsureGeocodingAsync(data.Depots.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase), cancellationToken);
+        return await BuildDepotsResponseAsync(data, FleetDataset.PostNl, cancellationToken);
+    }
+
+    public async Task<FleetDepotsResponse> GetCharterDepotsAsync(CancellationToken cancellationToken)
+    {
+        var data = await EnsureLoadedAsync(FleetDataset.Charter, cancellationToken);
+        if (data is null)
+        {
+            return new FleetDepotsResponse(
+                "missing",
+                "Charterstandplaatsen-Excel niet gevonden op de verwachte locatie.",
+                _options.CharterFleetExcelPath ?? "(niet geconfigureerd)",
+                "Charterstandplaatsen uit aparte Excel; markers zijn gegeocodeerd op adres, plaats en land.",
+                0,
+                []);
+        }
+
+        return await BuildDepotsResponseAsync(data, FleetDataset.Charter, cancellationToken);
+    }
+
+    private async Task<FleetDepotsResponse> BuildDepotsResponseAsync(
+        FleetData data,
+        FleetDataset dataset,
+        CancellationToken cancellationToken)
+    {
+        var geocode = await EnsureGeocodingAsync(
+            data.Depots.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase),
+            allowOnlineLookup: dataset != FleetDataset.Charter,
+            cancellationToken);
         var tripStats = await ComputeTripStatsAsync(data.Vehicles, cancellationToken);
 
         var depots = data.Depots
@@ -88,7 +117,7 @@ public sealed class FleetDataService
                 var matched = enriched.Count(v => v.TripsInData > 0);
                 geocode.TryGetValue(depot.Name, out var location);
                 return new FleetDepot(
-                    DepotId: "fleet:" + depot.Name,
+                    DepotId: (dataset == FleetDataset.Charter ? "charter-fleet:" : "fleet:") + depot.Name,
                     Name: depot.Name,
                     Regio: depot.Regio,
                     TypeLocatie: depot.TypeLocatie,
@@ -109,34 +138,49 @@ public sealed class FleetDataService
             "ok",
             null,
             data.SourceLabel,
-            Disclaimer,
+            dataset == FleetDataset.Charter
+                ? "Charterstandplaatsen uit aparte Excel; markers zijn gegeocodeerd op adres, plaats en land."
+                : Disclaimer,
             data.Vehicles.Count,
             depots);
     }
 
-    private async Task<FleetData?> EnsureLoadedAsync(CancellationToken cancellationToken)
+    private async Task<FleetData?> EnsureLoadedAsync(FleetDataset dataset, CancellationToken cancellationToken)
     {
-        if (_data is not null)
+        var current = dataset == FleetDataset.Charter ? _charterData : _data;
+        if (current is not null)
         {
-            return _data;
+            return current;
         }
 
         await _loadLock.WaitAsync(cancellationToken);
         try
         {
-            if (_data is not null)
+            current = dataset == FleetDataset.Charter ? _charterData : _data;
+            if (current is not null)
             {
-                return _data;
+                return current;
             }
 
-            var path = _options.FleetExcelPath;
+            var path = dataset == FleetDataset.Charter ? _options.CharterFleetExcelPath : _options.FleetExcelPath;
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
                 return null;
             }
 
-            _data = LoadFromExcel(path);
-            return _data;
+            var loaded = dataset == FleetDataset.Charter
+                ? LoadCharterFromExcel(path)
+                : LoadFromExcel(path);
+            if (dataset == FleetDataset.Charter)
+            {
+                _charterData = loaded;
+            }
+            else
+            {
+                _data = loaded;
+            }
+
+            return loaded;
         }
         finally
         {
@@ -162,6 +206,27 @@ public sealed class FleetDataService
 
         var depots = ParseDepots(depotRows);
         var vehicles = ParseVehicles(vehicleRows);
+        return new FleetData(depots, vehicles, Path.GetFileName(path));
+    }
+
+    private static FleetData LoadCharterFromExcel(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var sharedStrings = XlsxReader.ReadSharedStrings(archive);
+
+        var depotsPath = XlsxReader.ResolveWorksheetPath(archive, "Aantallen");
+        var vehiclesPath = XlsxReader.ResolveWorksheetPath(archive, "Voertuigen");
+        if (depotsPath is null || vehiclesPath is null)
+        {
+            throw new InvalidOperationException("Charterstandplaatsen-Excel mist sheet 'Aantallen' of 'Voertuigen'.");
+        }
+
+        var depotRows = XlsxReader.ReadWorksheetRows(archive, depotsPath, sharedStrings).ToArray();
+        var vehicleRows = XlsxReader.ReadWorksheetRows(archive, vehiclesPath, sharedStrings).ToArray();
+
+        var depots = ParseCharterDepots(depotRows);
+        var vehicles = ParseCharterVehicles(vehicleRows);
         return new FleetData(depots, vehicles, Path.GetFileName(path));
     }
 
@@ -247,6 +312,91 @@ public sealed class FleetDataService
         return list;
     }
 
+    private static List<FleetDepotRaw> ParseCharterDepots(IReadOnlyList<string[]> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var headers = rows[0].Select(XlsxReader.NormalizeHeader).ToArray();
+        var addressIdx = FindHeader(headers, "standplaats:_adres", "standplaats_adres");
+        var placeIdx = FindHeader(headers, "standplaats:_plaats", "standplaats_plaats");
+        var countryIdx = FindHeader(headers, "standplaats:_land", "standplaats_land");
+        if (addressIdx < 0 || placeIdx < 0)
+        {
+            return [];
+        }
+
+        return rows
+            .Skip(1)
+            .Select(row => new
+            {
+                Address = XlsxReader.Cell(row, addressIdx).Trim(),
+                Place = XlsxReader.Cell(row, placeIdx).Trim(),
+                Country = countryIdx >= 0 ? XlsxReader.Cell(row, countryIdx).Trim() : "Nederland"
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Address) && !string.IsNullOrWhiteSpace(x.Place))
+            .Select(x => new FleetDepotRaw(FormatStandplaats(x.Address, x.Place, x.Country), x.Place, "Charterstandplaats"))
+            .DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<FleetVehicleRaw> ParseCharterVehicles(IReadOnlyList<string[]> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var headers = rows[0].Select(XlsxReader.NormalizeHeader).ToArray();
+        var codeIdx = FindHeader(headers, "voertuig:_wagencode", "voertuig_wagencode", "wagencode");
+        var typeIdx = FindHeader(headers, "type_voertuig");
+        var fuelIdx = FindHeader(headers, "brandstoftype");
+        var inzetIdx = FindHeader(headers, "inzet_type");
+        var addressIdx = FindHeader(headers, "standplaats:_adres", "standplaats_adres");
+        var placeIdx = FindHeader(headers, "standplaats:_plaats", "standplaats_plaats");
+        var countryIdx = FindHeader(headers, "standplaats:_land", "standplaats_land");
+        if (codeIdx < 0 || addressIdx < 0 || placeIdx < 0)
+        {
+            return [];
+        }
+
+        var list = new List<FleetVehicleRaw>();
+        foreach (var row in rows.Skip(1))
+        {
+            var code = XlsxReader.Cell(row, codeIdx).Trim();
+            var address = XlsxReader.Cell(row, addressIdx).Trim();
+            var place = XlsxReader.Cell(row, placeIdx).Trim();
+            var country = countryIdx >= 0 ? XlsxReader.Cell(row, countryIdx).Trim() : "Nederland";
+            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(place))
+            {
+                continue;
+            }
+
+            list.Add(new FleetVehicleRaw(
+                Vlootnummer: code,
+                Kenteken: "",
+                KentekenNorm: "",
+                Regio: place,
+                Opstapplaats: FormatStandplaats(address, place, country),
+                TypeLocatie: inzetIdx >= 0 ? XlsxReader.Cell(row, inzetIdx).Trim() : "Charterstandplaats",
+                Merk: "",
+                SoortVoertuig: typeIdx >= 0 ? XlsxReader.Cell(row, typeIdx).Trim() : "",
+                SoortBrandstof: fuelIdx >= 0 ? XlsxReader.Cell(row, fuelIdx).Trim() : ""));
+        }
+
+        return list;
+    }
+
+    private static string FormatStandplaats(string address, string place, string country)
+    {
+        var parts = new[] { address, place, string.IsNullOrWhiteSpace(country) ? "Nederland" : country }
+            .Where(x => !string.IsNullOrWhiteSpace(x.Trim()))
+            .Select(x => x.Trim());
+        return string.Join(", ", parts);
+    }
+
     private static int FindHeader(string[] headers, params string[] candidates)
     {
         foreach (var candidate in candidates)
@@ -267,7 +417,10 @@ public sealed class FleetDataService
         return new string(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     }
 
-    private async Task<Dictionary<string, GeocodeEntry>> EnsureGeocodingAsync(IEnumerable<string> depotNames, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, GeocodeEntry>> EnsureGeocodingAsync(
+        IEnumerable<string> depotNames,
+        bool allowOnlineLookup,
+        CancellationToken cancellationToken)
     {
         await _geocodeLock.WaitAsync(cancellationToken);
         try
@@ -279,7 +432,7 @@ public sealed class FleetDataService
             }
 
             var missing = depotNames.Where(name => !_geocodeCache.ContainsKey(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            if (missing.Length == 0)
+            if (missing.Length == 0 || !allowOnlineLookup)
             {
                 return _geocodeCache;
             }
@@ -316,7 +469,7 @@ public sealed class FleetDataService
         {
             try
             {
-                var url = $"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=nl&q={Uri.EscapeDataString(query)}";
+                var url = $"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=nl,be,de&q={Uri.EscapeDataString(query)}";
                 using var response = await client.GetAsync(url, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -361,17 +514,26 @@ public sealed class FleetDataService
             yield break;
         }
 
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (yielded.Add(trimmed))
+        {
+            yield return trimmed;
+        }
+
         var spaceIdx = trimmed.IndexOf(' ');
         if (spaceIdx > 0 && spaceIdx < trimmed.Length - 1)
         {
             var rest = trimmed[(spaceIdx + 1)..].Trim();
-            if (!string.IsNullOrWhiteSpace(rest))
+            if (!string.IsNullOrWhiteSpace(rest) && yielded.Add(rest + ", Nederland"))
             {
                 yield return rest + ", Nederland";
             }
         }
 
-        yield return trimmed + ", Nederland";
+        if (!trimmed.Contains(',', StringComparison.Ordinal) && yielded.Add(trimmed + ", Nederland"))
+        {
+            yield return trimmed + ", Nederland";
+        }
     }
 
     private string GeocodeCachePath()
@@ -508,6 +670,12 @@ public sealed class FleetDataService
     }
 
     private sealed record FleetData(List<FleetDepotRaw> Depots, List<FleetVehicleRaw> Vehicles, string SourceLabel);
+
+    private enum FleetDataset
+    {
+        PostNl,
+        Charter
+    }
 
     private sealed record FleetDepotRaw(string Name, string Regio, string TypeLocatie);
 

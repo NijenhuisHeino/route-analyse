@@ -249,6 +249,39 @@ window.routePlannerMap = (() => {
     };
   }
 
+  function showStandplaatsPopup(feature, sourceLabel, disclaimer) {
+    if (!feature) return;
+    const p = feature.properties || {};
+    let vehicles = [];
+    try { vehicles = JSON.parse(p.vehicleList || "[]"); } catch { vehicles = []; }
+    const rows = vehicles.slice(0, 80).map((v) => {
+      const trips = Number(v.tripsInData || 0);
+      const tripsLabel = trips > 0 ? `${trips.toLocaleString("nl-NL")} ritten` : "geen ritten in ritdata";
+      const identifier = v.kenteken || v.vlootnummer || "";
+      const secondary = v.kenteken ? v.vlootnummer : v.typeLocatie;
+      const vehicleType = v.merk || v.soortVoertuig || v.soortBrandstof || "";
+      return `<tr><td><strong>${escapeHtml(identifier)}</strong></td><td>${escapeHtml(secondary || "")}</td><td>${escapeHtml(vehicleType)}</td><td>${escapeHtml(tripsLabel)}</td></tr>`;
+    }).join("");
+    const hiddenCount = vehicles.length - Math.min(vehicles.length, 80);
+    const hiddenNote = hiddenCount > 0 ? `<p class="standplaats-popup__hidden">+${hiddenCount} meer voertuig(en) niet getoond</p>` : "";
+    new maplibregl.Popup({ closeButton: true, maxWidth: "460px" })
+      .setLngLat(feature.geometry.coordinates)
+      .setHTML(`
+        <div class="standplaats-popup">
+          <strong>${escapeHtml(p.name || sourceLabel)}</strong>
+          <span>${escapeHtml(sourceLabel)}${p.regio ? " · " + escapeHtml(p.regio) : ""}</span>
+          <span>${Number(p.vehicles || 0).toLocaleString("nl-NL")} voertuigen · ${Number(p.matchedInTrips || 0).toLocaleString("nl-NL")} met ritten in data</span>
+          <table class="standplaats-popup__table">
+            <thead><tr><th>Voertuig</th><th>Inzet/vloot</th><th>Type</th><th>Activiteit</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${hiddenNote}
+          <p class="standplaats-popup__disclaimer">${escapeHtml(disclaimer)}</p>
+        </div>
+      `)
+      .addTo(map);
+  }
+
   function addLayers() {
     ensureSource("stop-heat");
     ensureSource("selection-heat");
@@ -259,6 +292,7 @@ window.routePlannerMap = (() => {
     ensureSource("road-heat");
     ensureSource("overnight-locations");
     ensureSource("fleet-standplaatsen");
+    ensureSource("charter-standplaatsen");
     ensureSource("chargers");
 
     if (!map.getLayer("stop-heat")) {
@@ -537,37 +571,31 @@ window.routePlannerMap = (() => {
       });
 
       map.on("click", "fleet-standplaatsen", (event) => {
-        const feature = event.features?.[0];
-        if (!feature) return;
-        const p = feature.properties || {};
-        let vehicles = [];
-        try { vehicles = JSON.parse(p.vehicleList || "[]"); } catch { vehicles = []; }
-        const rows = vehicles.slice(0, 50).map((v) => {
-          const trips = Number(v.tripsInData || 0);
-          const tripsLabel = trips > 0 ? `${trips.toLocaleString("nl-NL")} ritten` : "geen ritten in data";
-          return `<tr><td><strong>${escapeHtml(v.kenteken || "")}</strong></td><td>${escapeHtml(v.vlootnummer || "")}</td><td>${escapeHtml(v.merk || "")}</td><td>${escapeHtml(tripsLabel)}</td></tr>`;
-        }).join("");
-        const hiddenCount = vehicles.length - Math.min(vehicles.length, 50);
-        const hiddenNote = hiddenCount > 0 ? `<p class="standplaats-popup__hidden">+${hiddenCount} meer voertuig(en) niet getoond</p>` : "";
-        new maplibregl.Popup({ closeButton: true, maxWidth: "420px" })
-          .setLngLat(feature.geometry.coordinates)
-          .setHTML(`
-            <div class="standplaats-popup">
-              <strong>${escapeHtml(p.name || "Standplaats")}</strong>
-              <span>${escapeHtml(p.typeLocatie || "")}${p.regio ? " · " + escapeHtml(p.regio) : ""}</span>
-              <span>${Number(p.vehicles || 0)} voertuigen · ${Number(p.matchedInTrips || 0)} met ritten in data</span>
-              <table class="standplaats-popup__table">
-                <thead><tr><th>Kenteken</th><th>Vloot</th><th>Merk</th><th>Activiteit</th></tr></thead>
-                <tbody>${rows}</tbody>
-              </table>
-              ${hiddenNote}
-              <p class="standplaats-popup__disclaimer">Standplaats is ruw gegeocodeerd op plaatsnaam.</p>
-            </div>
-          `)
-          .addTo(map);
+        showStandplaatsPopup(event.features?.[0], "PostNL-wagenparkstandplaats", "Standplaats is ruw gegeocodeerd op plaatsnaam.");
       });
       map.on("mouseenter", "fleet-standplaatsen", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "fleet-standplaatsen", () => { map.getCanvas().style.cursor = ""; });
+    }
+
+    if (!map.getLayer("charter-standplaatsen")) {
+      map.addLayer({
+        id: "charter-standplaatsen",
+        type: "circle",
+        source: "charter-standplaatsen",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["get", "vehicles"], 1, 5, 30, 16],
+          "circle-color": "#7c3aed",
+          "circle-opacity": 0.82,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff"
+        }
+      });
+
+      map.on("click", "charter-standplaatsen", (event) => {
+        showStandplaatsPopup(event.features?.[0], "Charterstandplaats", "Charterstandplaats uit aparte Excel; bedoeld als fysiek shift-startpunt.");
+      });
+      map.on("mouseenter", "charter-standplaatsen", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "charter-standplaatsen", () => { map.getCanvas().style.cursor = ""; });
     }
 
     if (map.getLayer("selection-heat") && map.getLayer("stop-markers")) {
@@ -705,7 +733,10 @@ window.routePlannerMap = (() => {
         const standplaatsenPromise = options.showStandplaatsen
           ? fetch(apiUrl("fleet/standplaatsen"), { signal }).then((r) => r.ok ? r.json() : { status: "error", depots: [] })
           : Promise.resolve({ status: "skipped", depots: [] });
-        const [stops, roads, breakDemand, breakRoads, chargers, overnight, standplaatsen] = await Promise.all([stopsPromise, roadsPromise, breakDemandPromise, breakRoadsPromise, chargersPromise, overnightPromise, standplaatsenPromise]);
+        const charterStandplaatsenPromise = options.showCharterStandplaatsen
+          ? fetch(apiUrl("fleet/charter-standplaatsen"), { signal }).then((r) => r.ok ? r.json() : { status: "error", depots: [] })
+          : Promise.resolve({ status: "skipped", depots: [] });
+        const [stops, roads, breakDemand, breakRoads, chargers, overnight, standplaatsen, charterStandplaatsen] = await Promise.all([stopsPromise, roadsPromise, breakDemandPromise, breakRoadsPromise, chargersPromise, overnightPromise, standplaatsenPromise, charterStandplaatsenPromise]);
         const breakDemandFeatures = roadBreakDemandCollection(breakDemand.lines, breakRoads.lines);
 
         setData("stop-heat", featureCollection(stops.heatPoints));
@@ -716,6 +747,7 @@ window.routePlannerMap = (() => {
         setData("chargers", chargerCollection(chargers.markers));
         setData("overnight-locations", overnightCollection(overnight.locations));
         setData("fleet-standplaatsen", standplaatsCollection(standplaatsen.depots));
+        setData("charter-standplaatsen", standplaatsCollection(charterStandplaatsen.depots));
 
         setVisibility("stop-heat", !!options.showStopHeat);
         setVisibility("stop-markers", !!options.showMarkers);
@@ -728,6 +760,7 @@ window.routePlannerMap = (() => {
         setVisibility("chargers", !!options.showChargers && chargers.status === "ok");
         setVisibility("overnight-locations", !!options.showOvernight && overnight.status === "ok");
         setVisibility("fleet-standplaatsen", !!options.showStandplaatsen && standplaatsen.status === "ok");
+        setVisibility("charter-standplaatsen", !!options.showCharterStandplaatsen && charterStandplaatsen.status === "ok");
 
         if (stops.markers?.length) {
           const bounds = new maplibregl.LngLatBounds();
@@ -742,11 +775,13 @@ window.routePlannerMap = (() => {
         if (options.showChargers && chargers.status === "ok") notes.push(`${chargers.markers?.length || 0} laders`);
         if (options.showOvernight && overnight.status === "ok") notes.push(`${overnight.locations?.length || 0} vaste stilstandlocaties`);
         if (options.showStandplaatsen && standplaatsen.status === "ok") notes.push(`${standplaatsen.depots?.length || 0} standplaatsen`);
+        if (options.showCharterStandplaatsen && charterStandplaatsen.status === "ok") notes.push(`${charterStandplaatsen.depots?.length || 0} charterstandplaatsen`);
         if (roads.status === "cache_missing") notes.push("weglaag niet beschikbaar");
         if (options.showRoadBreakDemand && breakDemand.status === "cache_missing") notes.push("pauzelaadvraag niet beschikbaar");
         if (options.showChargers && chargers.status === "cache_missing") notes.push("laadlocaties niet beschikbaar");
         if (options.showOvernight && overnight.status !== "ok") notes.push("vaste stilstandlocaties niet beschikbaar");
         if (options.showStandplaatsen && standplaatsen.status !== "ok") notes.push("standplaatsen niet beschikbaar");
+        if (options.showCharterStandplaatsen && charterStandplaatsen.status !== "ok") notes.push("charterstandplaatsen niet beschikbaar");
         status(notes.length ? `Kaart geladen · ${notes.join(" · ")}` : "Kaart geladen");
       } catch (error) {
         if (error.name !== "AbortError") {

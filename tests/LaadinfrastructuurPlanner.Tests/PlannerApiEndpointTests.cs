@@ -21,6 +21,22 @@ public sealed class PlannerApiEndpointTests : IDisposable
         File.WriteAllText(
             zeZonesPath,
             "pc6,ze_zone,ze_startdatum\n1234AB,Test ZE-zone,2025-01-01\n");
+        var charterPath = Path.Combine(cacheDir, "Standplaatsen charters.xlsx");
+        TestXlsxData.WriteCharterStandplaatsen(charterPath);
+        var geocodeDir = Path.Combine(cacheDir, "planner");
+        Directory.CreateDirectory(geocodeDir);
+        File.WriteAllText(
+            Path.Combine(geocodeDir, "fleet_geocode.json"),
+            """
+            {
+              "Teststraat 1, Utrecht, Nederland": {
+                "Lat": 52.09,
+                "Lon": 5.12,
+                "Query": "Teststraat 1, Utrecht, Nederland",
+                "Source": "test"
+              }
+            }
+            """);
 
         await using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
@@ -36,6 +52,7 @@ public sealed class PlannerApiEndpointTests : IDisposable
                         DuckDbPath = Path.Combine(cacheDir, "planner", "route-analysis.duckdb"),
                         ManifestPath = Path.Combine(cacheDir, "planner", "manifest.json"),
                         ZeZonesSourcePath = zeZonesPath,
+                        CharterFleetExcelPath = charterPath,
                     });
                 });
             });
@@ -102,6 +119,17 @@ public sealed class PlannerApiEndpointTests : IDisposable
         });
         Assert.Equal("ok", breakDemandDetail.Status);
         Assert.NotEmpty(breakDemandDetail.VehiclesInWindow);
+
+        var charterStandplaatsen = await client.GetFromJsonAsync<FleetDepotsResponse>("/api/fleet/charter-standplaatsen");
+        Assert.NotNull(charterStandplaatsen);
+        Assert.Equal("ok", charterStandplaatsen.Status);
+        Assert.Equal(2, charterStandplaatsen.TotalVehicles);
+        var charterDepot = Assert.Single(charterStandplaatsen.Depots);
+        Assert.Equal("charter-fleet:Teststraat 1, Utrecht, Nederland", charterDepot.DepotId);
+        Assert.Equal(2, charterDepot.Vehicles);
+        Assert.Equal(52.09, charterDepot.Lat);
+        Assert.Equal(5.12, charterDepot.Lon);
+        Assert.Contains(charterDepot.VehicleList, vehicle => vehicle.Vlootnummer == "CHAR01" && vehicle.TypeLocatie == "Vast");
 
         var stopDetail = await PostAsync<SelectionDetailResponse>(client, "/api/stops/location", new StopLocationDetailRequest
         {

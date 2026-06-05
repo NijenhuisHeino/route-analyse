@@ -67,6 +67,9 @@ public static class PlannerApiEndpoints
         api.MapGet("/fleet/standplaatsen", (FleetDataService fleet, CancellationToken cancellationToken) =>
             fleet.GetDepotsAsync(cancellationToken));
 
+        api.MapGet("/fleet/charter-standplaatsen", (FleetDataService fleet, CancellationToken cancellationToken) =>
+            fleet.GetCharterDepotsAsync(cancellationToken));
+
         return endpoints;
     }
 }

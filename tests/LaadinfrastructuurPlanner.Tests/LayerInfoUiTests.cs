@@ -25,6 +25,7 @@ public sealed class LayerInfoUiTests
         AssertLayerInfo(home, "wegdrukte", "Wegdrukte", "veel meer concentratiepunten");
         AssertLayerInfo(home, "vaste-stilstandlocaties", "Vaste stilstandlocaties", "gevraagde publieke laadvraag");
         AssertLayerInfo(home, "standplaatsen", "Standplaatsen (PostNL-wagenpark)", "thuisbases zijn");
+        AssertLayerInfo(home, "charter-standplaatsen", "Charterstandplaatsen", "Fysieke standplaatsen van charters");
         AssertLayerInfo(home, "laadlocaties", "Laadlocaties", "vermogen, stekkers, toegang");
     }
 

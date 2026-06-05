@@ -11,6 +11,7 @@ public sealed class RouteAnalysisOptions
     public string? ExternalCacheDir { get; init; }
     public string? ZeZonesSourcePath { get; init; }
     public string? FleetExcelPath { get; init; }
+    public string? CharterFleetExcelPath { get; init; }
     public VehiclePowerAssumption[] VehiclePowerAssumptions { get; init; } = RouteAnalysisDefaults.VehiclePowerAssumptions;
     public ScenarioInflowAssumption[] ScenarioInflows { get; init; } = RouteAnalysisDefaults.ScenarioInflows;
     public string FocusLocationAlias { get; init; } = "Nieuwegein (Groteweerd 80)";
@@ -33,6 +34,7 @@ public static class RouteAnalysisOptionsFactory
         var externalCacheDir = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_EXTERNAL_CACHE_DIR");
         var zeZonesSourcePath = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_ZE_ZONES_PATH");
         var fleetExcelEnv = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_FLEET_EXCEL_PATH");
+        var charterFleetExcelEnv = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_CHARTER_FLEET_EXCEL_PATH");
         var driveDataDir = "/Users/johnnynijenhuis/Library/CloudStorage/GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten/Route analyse tool/data";
 
         var powerAssumptions = configuration?.GetSection("RouteAnalysis:VehiclePowerAssumptions").Get<VehiclePowerAssumption[]>()
@@ -55,6 +57,10 @@ public static class RouteAnalysisOptionsFactory
                 fleetExcelEnv,
                 Path.Combine(driveDataDir, "ev_wagenpark_standplaatsen.xlsx"),
                 Path.Combine(cacheDir, "ev_wagenpark_standplaatsen.xlsx")),
+            CharterFleetExcelPath = FirstExistingFile(
+                charterFleetExcelEnv,
+                Path.Combine(driveDataDir, "Standplaatsen charters.xlsx"),
+                Path.Combine(cacheDir, "Standplaatsen charters.xlsx")),
             VehiclePowerAssumptions = powerAssumptions.Length == 0 ? RouteAnalysisDefaults.VehiclePowerAssumptions : powerAssumptions,
             ScenarioInflows = scenarioInflows.Length == 0 ? RouteAnalysisDefaults.ScenarioInflows : scenarioInflows,
             FocusLocationAlias = string.IsNullOrWhiteSpace(focusLocationAlias) ? "Nieuwegein (Groteweerd 80)" : focusLocationAlias,
