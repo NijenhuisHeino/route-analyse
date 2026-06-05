@@ -323,6 +323,27 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandTopPercentRanksVisibleLinesByPausePassages()
+    {
+        var all = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            RoadTopPercent = 100,
+            KwhPerKm = 1.0
+        });
+        var topOnePercent = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            RoadTopPercent = 1,
+            KwhPerKm = 1.0
+        });
+
+        Assert.True(all.Lines.Length > topOnePercent.Lines.Length);
+        Assert.NotEmpty(topOnePercent.Lines);
+        Assert.All(topOnePercent.Lines, line => Assert.Equal(all.Lines.Max(x => x.Passages), line.Passages));
+    }
+
+    [Fact]
     public async Task RoadBreakDemandResetsOnlyAfterLongGapAtResetLocation()
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest

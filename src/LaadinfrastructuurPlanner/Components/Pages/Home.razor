@@ -105,7 +105,7 @@
                 </div>
                 @if (OpenLayerInfoId == "pauzelaadvraag")
                 {
-                    <p id="layer-info-pauzelaadvraag" class="layer-info-panel">Wegvlakken waar voertuigen volgens de rijtijd-teller tussen het ingestelde pauzevenster vallen. De kleur en dikte tonen de berekende piekvraag, niet de beschikbare laadcapaciteit.</p>
+                    <p id="layer-info-pauzelaadvraag" class="layer-info-panel">Wegvlakken waar voertuigen volgens de rijtijd-teller tussen het ingestelde pauzevenster vallen. De topfilter rangschikt op aantal pauzepassages; kleur en dikte tonen ook dat aantal. De piek-MW blijft beschikbaar in het detail.</p>
                 }
             </div>
             <div class="layer-toggle-item">
@@ -181,6 +181,12 @@
             <label>
                 Min. pauzepassages
                 <input type="number" min="1" max="500" step="1" @bind="BreakDemandMinPassages" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
+                Top pauzelaadvraag (%)
+                <input type="number" min="0" max="100" step="1" @bind="BreakDemandTopPercent" @bind:after="RefreshMapAsync" />
+                <input class="range-control" type="range" min="0" max="100" step="1" @bind="BreakDemandTopPercent" @bind:event="oninput" @bind:after="RefreshMapAsync" />
+                <span class="range-value">Top @BreakDemandTopPercent% op aantal pauzepassages</span>
             </label>
             <label>
                 Shift-reset gap (uur)
@@ -552,7 +558,7 @@
                             <span class="legend-line road-break-demand-line"></span>
                             <div>
                                 <strong>Pauzelaadvraag</strong>
-                                <span>Oranje/rode wegvlakken met gevraagde piek-MW op basis van rijtijd en pauzeduur.</span>
+                                <span>Oranje/rode wegvlakken; kleur en dikte lopen op met het aantal pauzepassages binnen het rijtijdvenster.</span>
                             </div>
                         </div>
                     }
@@ -1023,6 +1029,7 @@
     private double BreakWindowEndHours { get; set; } = 4.5;
     private double BreakDurationHours { get; set; } = 0.75;
     private int BreakDemandMinPassages { get; set; } = 1;
+    private int BreakDemandTopPercent { get; set; } = 10;
     private double ShiftResetGapHours { get; set; } = 2.0;
     private double ChargerMinPowerKw { get; set; } = 350;
     private int ChargerMinConnectors { get; set; } = 1;
@@ -1326,7 +1333,7 @@
             Wagencodes = filter.Wagencodes,
             MinDwellMin = filter.MinDwellMin,
             RoadThreshold = BreakDemandMinPassages,
-            RoadTopPercent = filter.RoadTopPercent,
+            RoadTopPercent = BreakDemandTopPercent,
             MarkerTopN = filter.MarkerTopN,
             ZeZoneMode = filter.ZeZoneMode,
             KwhPerKm = ScenarioKwhPerKm,
@@ -1347,8 +1354,8 @@
             Vervoerders = filter.Vervoerders,
             Wagencodes = filter.Wagencodes,
             MinDwellMin = filter.MinDwellMin,
-            RoadThreshold = filter.RoadThreshold,
-            RoadTopPercent = filter.RoadTopPercent,
+            RoadThreshold = BreakDemandMinPassages,
+            RoadTopPercent = BreakDemandTopPercent,
             MarkerTopN = filter.MarkerTopN,
             ZeZoneMode = filter.ZeZoneMode,
             KwhPerKm = ScenarioKwhPerKm,

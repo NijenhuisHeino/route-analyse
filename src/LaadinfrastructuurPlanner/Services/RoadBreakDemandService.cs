@@ -263,7 +263,7 @@ public sealed partial class RouteAnalysisService
         IReadOnlyList<RoadBreakEvent> events,
         RoadBreakDemandRequest request)
     {
-        return events
+        var ordered = events
             .GroupBy(RoadBreakSegmentKey, StringComparer.Ordinal)
             .Select(group =>
             {
@@ -298,9 +298,25 @@ public sealed partial class RouteAnalysisService
                     endpoints);
             })
             .Where(x => x.Passages >= request.RoadThreshold)
-            .OrderByDescending(x => x.PeakMw)
-            .ThenByDescending(x => x.Passages)
-            .Take(4_000)
+            .OrderByDescending(x => x.Passages)
+            .ThenByDescending(x => x.PeakMw)
+            .ThenByDescending(x => x.TotalKwh)
+            .ThenBy(x => x.SegmentId, StringComparer.Ordinal)
+            .ToArray();
+
+        if (ordered.Length == 0 || request.RoadTopPercent <= 0)
+        {
+            return [];
+        }
+
+        var take = (int)Math.Ceiling(ordered.Length * Math.Clamp(request.RoadTopPercent, 0, 100) / 100.0);
+        take = Math.Clamp(take, 1, 4_000);
+
+        return ordered
+            .Take(take)
+            .OrderByDescending(x => x.Passages)
+            .ThenByDescending(x => x.PeakMw)
+            .ThenByDescending(x => x.TotalKwh)
             .ToArray();
     }
 
@@ -354,7 +370,7 @@ public sealed partial class RouteAnalysisService
             Wagencodes = normalized.Wagencodes,
             MinDwellMin = normalized.MinDwellMin,
             RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
+            RoadTopPercent = Math.Clamp(request.RoadTopPercent, 0, 100),
             MarkerTopN = normalized.MarkerTopN,
             ZeZoneMode = normalized.ZeZoneMode,
             KwhPerKm = Math.Clamp(request.KwhPerKm, 0.1, 5),

@@ -85,7 +85,7 @@ window.routePlannerMap = (() => {
             type: "Feature",
             properties: {
               segmentId: line.segmentId || "",
-              weight: line.peakMw || 0,
+              weight: line.passages || 0,
               peakMw: line.peakMw || 0,
               totalKwh: line.totalKwh || 0,
               vehicles: line.vehicles || 0,
@@ -401,7 +401,7 @@ window.routePlannerMap = (() => {
         source: "road-break-demand",
         paint: {
           "line-color": "#ffffff",
-          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 6, 1, 10, 4, 15],
+          "line-width": ["interpolate", ["linear"], ["get", "passages"], 1, 6, 25, 10, 100, 14, 500, 18],
           "line-opacity": 0.88
         }
       });
@@ -413,8 +413,8 @@ window.routePlannerMap = (() => {
         type: "line",
         source: "road-break-demand",
         paint: {
-          "line-color": ["interpolate", ["linear"], ["get", "peakMw"], 0, "#facc15", 0.5, "#fb923c", 1, "#f97316", 4, "#dc2626"],
-          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 3, 1, 7, 4, 12],
+          "line-color": ["interpolate", ["linear"], ["get", "passages"], 1, "#facc15", 10, "#fb923c", 50, "#f97316", 100, "#dc2626", 500, "#7f1d1d"],
+          "line-width": ["interpolate", ["linear"], ["get", "passages"], 1, 3, 25, 6, 100, 10, 500, 14],
           "line-opacity": 0.96
         }
       });
