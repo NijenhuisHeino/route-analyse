@@ -330,15 +330,30 @@ window.routePlannerMap = (() => {
       map.moveLayer("road-selection", "road-lines-hitbox");
     }
 
+    if (!map.getLayer("road-break-demand-casing")) {
+      map.addLayer({
+        id: "road-break-demand-casing",
+        type: "line",
+        source: "road-break-demand",
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 6, 1, 10, 4, 15],
+          "line-opacity": 0.88,
+          "line-offset": 7
+        }
+      });
+    }
+
     if (!map.getLayer("road-break-demand")) {
       map.addLayer({
         id: "road-break-demand",
         type: "line",
         source: "road-break-demand",
         paint: {
-          "line-color": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, "#fde68a", 1, "#f97316", 4, "#b91c1c"],
-          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 2, 1, 5, 4, 9],
-          "line-opacity": 0.9
+          "line-color": ["interpolate", ["linear"], ["get", "peakMw"], 0, "#facc15", 0.5, "#fb923c", 1, "#f97316", 4, "#dc2626"],
+          "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 3, 1, 7, 4, 12],
+          "line-opacity": 0.96,
+          "line-offset": 7
         }
       });
 
@@ -474,6 +489,15 @@ window.routePlannerMap = (() => {
     if (map.getLayer("selection-heat") && map.getLayer("stop-markers")) {
       map.moveLayer("selection-heat", "stop-markers");
     }
+    if (map.getLayer("road-break-demand-casing")) {
+      map.moveLayer("road-break-demand-casing");
+    }
+    if (map.getLayer("road-break-demand")) {
+      map.moveLayer("road-break-demand");
+    }
+    if (map.getLayer("road-selection")) {
+      map.moveLayer("road-selection");
+    }
   }
 
   function selectRoadFeature(feature) {
@@ -608,6 +632,7 @@ window.routePlannerMap = (() => {
         setVisibility("road-lines", !!options.showRoads && roads.status === "ok");
         setVisibility("road-selection", (!!options.showRoads && roads.status === "ok") || (!!options.showRoadBreakDemand && breakDemand.status === "ok"));
         setVisibility("road-lines-hitbox", !!options.showRoads && roads.status === "ok");
+        setVisibility("road-break-demand-casing", !!options.showRoadBreakDemand && breakDemand.status === "ok");
         setVisibility("road-break-demand", !!options.showRoadBreakDemand && breakDemand.status === "ok");
         setVisibility("road-heat", !!options.showRoadHeat && roads.status === "ok");
         setVisibility("chargers", !!options.showChargers && chargers.status === "ok");
