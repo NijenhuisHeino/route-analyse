@@ -479,9 +479,13 @@
                         }
                         <button type="button"
                                 class="legend-toggle"
+                                data-legend-toggle="true"
                                 title="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
                                 aria-label="@(LegendCollapsed ? "Legenda tonen" : "Legenda minimaliseren")"
-                                @onclick="() => LegendCollapsed = !LegendCollapsed">
+                                aria-expanded="@((!LegendCollapsed).ToString().ToLowerInvariant())"
+                                @onclick="ToggleLegend"
+                                @onclick:stopPropagation="true"
+                                @onclick:preventDefault="true">
                             @(LegendCollapsed ? "+" : "-")
                         </button>
                     </div>
@@ -1053,6 +1057,11 @@
     private string LayerInfoExpanded(string layerId)
     {
         return OpenLayerInfoId == layerId ? "true" : "false";
+    }
+
+    private void ToggleLegend()
+    {
+        LegendCollapsed = !LegendCollapsed;
     }
 
     protected override async Task OnInitializedAsync()

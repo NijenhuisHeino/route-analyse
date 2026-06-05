@@ -12,6 +12,28 @@ window.routePlannerMap = (() => {
     if (el) el.textContent = text;
   }
 
+  function setLegendCollapsed(legend, button, collapsed) {
+    legend.classList.toggle("is-collapsed", collapsed);
+    button.textContent = collapsed ? "+" : "-";
+    button.title = collapsed ? "Legenda tonen" : "Legenda minimaliseren";
+    button.setAttribute("aria-label", button.title);
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+
+  function wireLegendToggle() {
+    const legend = document.querySelector(".map-legend");
+    const button = legend?.querySelector("[data-legend-toggle]");
+    if (!legend || !button || button.dataset.legendFallback === "true") {
+      return;
+    }
+
+    button.dataset.legendFallback = "true";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      setLegendCollapsed(legend, button, !legend.classList.contains("is-collapsed"));
+    });
+  }
+
   function emptyFeatureCollection() {
     return { type: "FeatureCollection", features: [] };
   }
@@ -627,6 +649,7 @@ window.routePlannerMap = (() => {
     init: (elementId, callbacks) => {
       if (map) return;
       dotNetRef = callbacks;
+      wireLegendToggle();
       map = new maplibregl.Map({
         container: elementId,
         center: [5.3, 52.1],
@@ -654,6 +677,7 @@ window.routePlannerMap = (() => {
         window.setTimeout(() => window.routePlannerMap.update(filter, chargerFilter, overnightFilter, breakDemandFilter, options), 100);
         return;
       }
+      wireLegendToggle();
       addLayers();
 
       if (abortController) abortController.abort();

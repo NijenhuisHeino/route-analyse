@@ -612,6 +612,11 @@ td span,
   border-bottom: 0;
 }
 
+.map-legend.is-collapsed .legend-heading > span,
+.map-legend.is-collapsed .legend-item {
+  display: none;
+}
+
 .legend-heading strong,
 .legend-item strong {
   color: var(--eta-purple);
