@@ -202,11 +202,14 @@ public sealed record RoadSelectionRequest : AnalysisFilter
 public record RoadBreakDemandRequest : AnalysisFilter
 {
     public double KwhPerKm { get; init; } = 1.2;
+    public double CapacityKwh { get; init; } = 590;
+    public double TargetSocPct { get; init; } = 100;
     public double WindowStartHours { get; init; } = 3.5;
     public double WindowEndHours { get; init; } = 4.5;
     public double BreakDurationHours { get; init; } = 0.75;
     public double ShiftResetGapHours { get; init; } = 2.0;
     public double ResetLocationRadiusKm { get; init; } = 0.75;
+    public double MaxAverageSpeedKmh { get; init; } = 95;
 }
 
 public sealed record RoadBreakDemandDetailRequest : RoadBreakDemandRequest

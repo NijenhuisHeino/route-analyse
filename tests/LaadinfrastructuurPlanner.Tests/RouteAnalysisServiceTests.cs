@@ -344,6 +344,26 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandCapsVehicleEnergyAtTargetBatteryCapacity()
+    {
+        var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(53.0, 6.0, 51.9, 4.5, 100),
+            KwhPerKm = 10.0,
+            CapacityKwh = 200,
+            TargetSocPct = 80,
+            BreakDurationHours = 0.75
+        });
+
+        Assert.NotEmpty(detail.VehiclesInWindow);
+        Assert.All(detail.VehiclesInWindow, row =>
+        {
+            Assert.True(row.DemandKwh <= 160, $"Demand for {row.Wagencode} was {row.DemandKwh} kWh");
+            Assert.True(row.RequiredKw <= 213.4, $"Required power for {row.Wagencode} was {row.RequiredKw} kW");
+        });
+    }
+
+    [Fact]
     public async Task RoadBreakDemandResetsOnlyAfterLongGapAtResetLocation()
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest

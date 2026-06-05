@@ -152,7 +152,9 @@ public sealed partial class RouteAnalysisService
         var excludedBeforeWindow = 0L;
         var excludedAfterWindow = 0L;
         var excludedInvalid = 0L;
+        var excludedImplausibleSpeed = 0L;
         var resetCount = 0L;
+        var maxVehicleDemandKwh = request.CapacityKwh * request.TargetSocPct / 100.0;
 
         foreach (var vehicleTrips in trips.GroupBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase))
         {
@@ -191,6 +193,16 @@ public sealed partial class RouteAnalysisService
                     continue;
                 }
 
+                var averageSpeedKmh = trip.DistanceKm / tripDriveHours;
+                if (averageSpeedKmh > request.MaxAverageSpeedKmh)
+                {
+                    excludedImplausibleSpeed++;
+                    previousEnd = trip.TripEnd;
+                    previousEndLat = trip.EndLat;
+                    previousEndLon = trip.EndLon;
+                    continue;
+                }
+
                 var driveBefore = driveHours;
                 var driveAfter = driveBefore + tripDriveHours;
                 if (driveAfter < request.WindowStartHours)
@@ -206,7 +218,7 @@ public sealed partial class RouteAnalysisService
                     var targetDrive = Math.Clamp(Math.Max(request.WindowStartHours, driveBefore), request.WindowStartHours, request.WindowEndHours);
                     var progress = Math.Clamp((targetDrive - driveBefore) / tripDriveHours, 0, 1);
                     var kmSinceShiftStart = shiftKm + trip.DistanceKm * progress;
-                    var demandKwh = kmSinceShiftStart * request.KwhPerKm;
+                    var demandKwh = Math.Min(kmSinceShiftStart * request.KwhPerKm, maxVehicleDemandKwh);
                     var requiredKw = request.BreakDurationHours <= 0 ? 0 : demandKwh / request.BreakDurationHours;
                     var lat = Interpolate(trip.StartLat, trip.EndLat, progress);
                     var lon = Interpolate(trip.StartLon, trip.EndLon, progress);
@@ -246,6 +258,7 @@ public sealed partial class RouteAnalysisService
             $"excluded: {excludedBeforeWindow} trips before window",
             $"excluded: {excludedAfterWindow} trips after window",
             $"excluded: {excludedInvalid} trips without usable duration or distance",
+            $"excluded: {excludedImplausibleSpeed} trips above {request.MaxAverageSpeedKmh:0} km/h average speed",
             $"resets: {resetCount} shift resets at repeated locations"
         };
 
@@ -254,7 +267,7 @@ public sealed partial class RouteAnalysisService
             new RoadBreakDemandDiagnostics(
                 trips.Count,
                 events.Count,
-                excludedBeforeWindow + excludedAfterWindow + excludedInvalid,
+                excludedBeforeWindow + excludedAfterWindow + excludedInvalid + excludedImplausibleSpeed,
                 events.LongCount(),
                 reasons));
     }
@@ -374,11 +387,14 @@ public sealed partial class RouteAnalysisService
             MarkerTopN = normalized.MarkerTopN,
             ZeZoneMode = normalized.ZeZoneMode,
             KwhPerKm = Math.Clamp(request.KwhPerKm, 0.1, 5),
+            CapacityKwh = Math.Clamp(request.CapacityKwh, 100, 1_500),
+            TargetSocPct = Math.Clamp(request.TargetSocPct, 20, 100),
             WindowStartHours = start,
             WindowEndHours = end,
             BreakDurationHours = Math.Clamp(request.BreakDurationHours, 0.25, 3),
             ShiftResetGapHours = Math.Clamp(request.ShiftResetGapHours, 0.5, 12),
-            ResetLocationRadiusKm = Math.Clamp(request.ResetLocationRadiusKm, 0.1, 5)
+            ResetLocationRadiusKm = Math.Clamp(request.ResetLocationRadiusKm, 0.1, 5),
+            MaxAverageSpeedKmh = Math.Clamp(request.MaxAverageSpeedKmh, 50, 120)
         };
     }
 
@@ -399,11 +415,14 @@ public sealed partial class RouteAnalysisService
             MarkerTopN = normalized.MarkerTopN,
             ZeZoneMode = normalized.ZeZoneMode,
             KwhPerKm = normalized.KwhPerKm,
+            CapacityKwh = normalized.CapacityKwh,
+            TargetSocPct = normalized.TargetSocPct,
             WindowStartHours = normalized.WindowStartHours,
             WindowEndHours = normalized.WindowEndHours,
             BreakDurationHours = normalized.BreakDurationHours,
             ShiftResetGapHours = normalized.ShiftResetGapHours,
             ResetLocationRadiusKm = normalized.ResetLocationRadiusKm,
+            MaxAverageSpeedKmh = normalized.MaxAverageSpeedKmh,
             Road = road with
             {
                 Lat1 = Math.Clamp(road.Lat1, -90, 90),
@@ -611,11 +630,14 @@ public sealed partial class RouteAnalysisService
             MarkerTopN = request.MarkerTopN,
             ZeZoneMode = request.ZeZoneMode,
             KwhPerKm = request.KwhPerKm,
+            CapacityKwh = request.CapacityKwh,
+            TargetSocPct = request.TargetSocPct,
             WindowStartHours = request.WindowStartHours,
             WindowEndHours = request.WindowEndHours,
             BreakDurationHours = request.BreakDurationHours,
             ShiftResetGapHours = request.ShiftResetGapHours,
-            ResetLocationRadiusKm = request.ResetLocationRadiusKm
+            ResetLocationRadiusKm = request.ResetLocationRadiusKm,
+            MaxAverageSpeedKmh = request.MaxAverageSpeedKmh
         };
     }
 

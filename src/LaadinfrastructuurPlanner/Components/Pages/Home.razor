@@ -154,17 +154,17 @@
             <label class="filter-group-title">Voertuig</label>
             <label>
                 kWh/km
-                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" @bind:after="RefreshMapAsync" />
+                <input type="number" min="0.5" max="3.5" step="0.1" @bind="ScenarioKwhPerKm" @bind:after="RefreshVehicleScenarioAsync" />
             </label>
             <label>
                 Batterijcapaciteit (kWh)
-                <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" @bind:after="RefreshPowerProfilesAsync" />
+                <input type="number" min="100" max="1500" step="10" @bind="ScenarioCapacityKwh" @bind:after="RefreshVehicleScenarioAsync" />
             </label>
             <label class="toggle mcs-toggle"><input type="checkbox" @bind="ScenarioMcsEnabled" @bind:after="RefreshPowerProfilesAsync" /> MCS laden toestaan</label>
             <span class="range-value">Max. afname per truck: @MaxVehicleKw.ToString("N0") kW</span>
             <label>
                 Doel laadniveau (%)
-                <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" />
+                <input type="number" min="20" max="100" step="5" @bind="ScenarioTargetSocPct" @bind:after="RefreshVehicleScenarioAsync" />
             </label>
             <label>
                 Rijtijd vanaf (uur)
@@ -778,7 +778,7 @@
                     <div class="table-panel nested-table">
                         <div class="panel-heading">
                             <h3>Voertuigen in pauzevenster</h3>
-                            <span>@SelectedRoadBreakDemand.VehiclesInWindow.Length voertuigen</span>
+                            <span>@SelectedRoadBreakDemand.Vehicles.ToString("N0") voertuigen · @SelectedRoadBreakDemand.Passages.ToString("N0") passages</span>
                         </div>
                         <div class="table-scroll">
                             <table>
@@ -794,7 +794,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var row in SelectedRoadBreakDemand.VehiclesInWindow.Take(40))
+                                    @foreach (var row in SelectedRoadBreakDemand.VehiclesInWindow)
                                     {
                                         <tr>
                                             <td><strong>@row.Kenteken</strong></td>
@@ -1195,6 +1195,18 @@
         }
     }
 
+    private async Task RefreshVehicleScenarioAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        await RefreshPowerProfilesAsync();
+        await RefreshMapAsync();
+        await RefreshSelectedDetailAsync();
+    }
+
     private async Task SelectPowerLocationAsync(string locationId)
     {
         var filter = BuildFilter();
@@ -1346,6 +1358,8 @@
             MarkerTopN = filter.MarkerTopN,
             ZeZoneMode = filter.ZeZoneMode,
             KwhPerKm = ScenarioKwhPerKm,
+            CapacityKwh = ScenarioCapacityKwh,
+            TargetSocPct = ScenarioTargetSocPct,
             WindowStartHours = BreakWindowStartHours,
             WindowEndHours = BreakWindowEndHours,
             BreakDurationHours = BreakDurationHours,
@@ -1368,6 +1382,8 @@
             MarkerTopN = filter.MarkerTopN,
             ZeZoneMode = filter.ZeZoneMode,
             KwhPerKm = ScenarioKwhPerKm,
+            CapacityKwh = ScenarioCapacityKwh,
+            TargetSocPct = ScenarioTargetSocPct,
             WindowStartHours = BreakWindowStartHours,
             WindowEndHours = BreakWindowEndHours,
             BreakDurationHours = BreakDurationHours,
