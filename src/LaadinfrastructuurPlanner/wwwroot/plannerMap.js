@@ -74,7 +74,7 @@ window.routePlannerMap = (() => {
     };
   }
 
-  function roadBreakDemandCollection(lines) {
+  function roadBreakDemandCollection(lines, roadLines = []) {
     return {
       type: "FeatureCollection",
       features: (lines || []).map((line) => ({
@@ -92,15 +92,73 @@ window.routePlannerMap = (() => {
         },
         geometry: {
           type: "LineString",
-          coordinates: line.coordinates?.length
-            ? line.coordinates.map((point) => [point.lon, point.lat])
-            : [
-                [line.lon1, line.lat1],
-                [line.lon2, line.lat2]
-              ]
+          coordinates: nearestRoadCoordinates(line, roadLines) || coordinatesForLine(line)
         }
       }))
     };
+  }
+
+  function coordinatesForLine(line) {
+    return line.coordinates?.length
+      ? line.coordinates.map((point) => [point.lon, point.lat])
+      : [
+          [line.lon1, line.lat1],
+          [line.lon2, line.lat2]
+        ];
+  }
+
+  function nearestRoadCoordinates(line, roadLines) {
+    if (!roadLines?.length) return null;
+    const source = coordinatesForLine(line);
+    const center = lineCenter(source);
+    let best = { km: Number.POSITIVE_INFINITY, coords: null };
+    for (const road of roadLines) {
+      const coords = coordinatesForLine(road);
+      for (let i = 1; i < coords.length; i += 1) {
+        const km = distancePointToSegmentKm(center[1], center[0], coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
+        if (km < best.km) {
+          best = { km, coords };
+        }
+      }
+    }
+
+    return best.km <= 5 ? best.coords : null;
+  }
+
+  function lineCenter(coords) {
+    const first = coords[0];
+    const last = coords[coords.length - 1] || first;
+    return [(first[0] + last[0]) / 2, (first[1] + last[1]) / 2];
+  }
+
+  function distancePointToSegmentKm(pointLat, pointLon, lat1, lon1, lat2, lon2) {
+    const meanLat = toRadians((pointLat + lat1 + lat2) / 3);
+    const kmPerDegreeLat = 111.32;
+    const kmPerDegreeLon = Math.max(1, kmPerDegreeLat * Math.cos(meanLat));
+    const px = pointLon * kmPerDegreeLon;
+    const py = pointLat * kmPerDegreeLat;
+    const ax = lon1 * kmPerDegreeLon;
+    const ay = lat1 * kmPerDegreeLat;
+    const bx = lon2 * kmPerDegreeLon;
+    const by = lat2 * kmPerDegreeLat;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 0) {
+      const x = px - ax;
+      const y = py - ay;
+      return Math.sqrt(x * x + y * y);
+    }
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared));
+    const closestX = ax + t * dx;
+    const closestY = ay + t * dy;
+    const x = px - closestX;
+    const y = py - closestY;
+    return Math.sqrt(x * x + y * y);
+  }
+
+  function toRadians(value) {
+    return value * Math.PI / 180;
   }
 
   function chargerCollection(chargers) {
@@ -338,8 +396,7 @@ window.routePlannerMap = (() => {
         paint: {
           "line-color": "#ffffff",
           "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 6, 1, 10, 4, 15],
-          "line-opacity": 0.88,
-          "line-offset": 7
+          "line-opacity": 0.88
         }
       });
     }
@@ -352,8 +409,7 @@ window.routePlannerMap = (() => {
         paint: {
           "line-color": ["interpolate", ["linear"], ["get", "peakMw"], 0, "#facc15", 0.5, "#fb923c", 1, "#f97316", 4, "#dc2626"],
           "line-width": ["interpolate", ["linear"], ["get", "peakMw"], 0.1, 3, 1, 7, 4, 12],
-          "line-opacity": 0.96,
-          "line-offset": 7
+          "line-opacity": 0.96
         }
       });
 
@@ -601,7 +657,7 @@ window.routePlannerMap = (() => {
 
       try {
         const stopsPromise = postJson("map/stops", filter, signal);
-        const roadsPromise = options.showRoads || options.showRoadHeat
+        const roadsPromise = options.showRoads || options.showRoadHeat || options.showRoadBreakDemand
           ? postJson("map/roads", filter, signal)
           : Promise.resolve({ status: "skipped", lines: [], heatPoints: [] });
         const breakDemandPromise = options.showRoadBreakDemand
@@ -621,7 +677,7 @@ window.routePlannerMap = (() => {
         setData("stop-heat", featureCollection(stops.heatPoints));
         setData("stop-markers", featureCollection(stops.markers, true));
         setData("road-lines", lineCollection(roads.lines));
-        setData("road-break-demand", roadBreakDemandCollection(breakDemand.lines));
+        setData("road-break-demand", roadBreakDemandCollection(breakDemand.lines, roads.lines));
         setData("road-heat", featureCollection(roads.heatPoints));
         setData("chargers", chargerCollection(chargers.markers));
         setData("overnight-locations", overnightCollection(overnight.locations));

@@ -8,7 +8,7 @@ public record AnalysisFilter
     public string[] Vervoerders { get; init; } = [];
     public string[] Wagencodes { get; init; } = [];
     public double MinDwellMin { get; init; }
-    public int RoadThreshold { get; init; } = 100;
+    public int RoadThreshold { get; init; } = 1;
     public int RoadTopPercent { get; init; } = 1;
     public int MarkerTopN { get; init; } = 250;
     public string ZeZoneMode { get; init; } = "all";

@@ -179,6 +179,10 @@
                 <input type="number" min="0.25" max="3" step="0.25" @bind="BreakDurationHours" @bind:after="RefreshMapAsync" />
             </label>
             <label>
+                Min. pauzepassages
+                <input type="number" min="1" max="500" step="1" @bind="BreakDemandMinPassages" @bind:after="RefreshMapAsync" />
+            </label>
+            <label>
                 Shift-reset gap (uur)
                 <input type="number" min="0.5" max="12" step="0.25" @bind="ShiftResetGapHours" @bind:after="RefreshMapAsync" />
             </label>
@@ -999,7 +1003,7 @@
     private string VervoerdersText { get; set; } = "";
     private string WagencodesText { get; set; } = "";
     private double MinDwellMin { get; set; }
-    private int RoadThreshold { get; set; } = 100;
+    private int RoadThreshold { get; set; } = 1;
     private int RoadTopPercent { get; set; } = 1;
     private string ZeZoneMode { get; set; } = "all";
     private bool ShowStopHeat { get; set; } = true;
@@ -1018,6 +1022,7 @@
     private double BreakWindowStartHours { get; set; } = 3.5;
     private double BreakWindowEndHours { get; set; } = 4.5;
     private double BreakDurationHours { get; set; } = 0.75;
+    private int BreakDemandMinPassages { get; set; } = 1;
     private double ShiftResetGapHours { get; set; } = 2.0;
     private double ChargerMinPowerKw { get; set; } = 350;
     private int ChargerMinConnectors { get; set; } = 1;
@@ -1320,7 +1325,7 @@
             Vervoerders = filter.Vervoerders,
             Wagencodes = filter.Wagencodes,
             MinDwellMin = filter.MinDwellMin,
-            RoadThreshold = filter.RoadThreshold,
+            RoadThreshold = BreakDemandMinPassages,
             RoadTopPercent = filter.RoadTopPercent,
             MarkerTopN = filter.MarkerTopN,
             ZeZoneMode = filter.ZeZoneMode,
