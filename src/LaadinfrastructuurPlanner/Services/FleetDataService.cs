@@ -501,6 +501,10 @@ public sealed class FleetDataService
             {
                 _logger.LogWarning(ex, "Geocoding fout voor {Query}", query);
             }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Geocoding time-out voor {Query}", query);
+            }
         }
 
         return null;

@@ -5,10 +5,50 @@ namespace LaadinfrastructuurPlanner.Tests;
 
 internal static class TestXlsxData
 {
+    public static void WritePostNlStandplaatsen(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddWorkbookScaffold(
+            archive,
+            "Aantal per standplaats",
+            "Alle wagens",
+            WorksheetXml([
+                ["Opstapplaats", "Type locatie"],
+                ["ScB Timeoutstad", "Brieven"],
+            ]),
+            WorksheetXml([
+                ["Vlootnummer", "Kenteken", "Regio", "Opstapplaats", "Type locatie", "Merk", "Soort voertuig", "Soort brandstof"],
+                ["999", "TEST-01", "Timeout", "ScB Timeoutstad", "Brieven", "Testmerk", "Trekker", "Elektrisch"],
+            ]));
+    }
+
     public static void WriteCharterStandplaatsen(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddWorkbookScaffold(
+            archive,
+            "Voertuigen",
+            "Aantallen",
+            WorksheetXml([
+                ["Voertuig: Wagencode", "Type voertuig", "Brandstoftype", "Inzet type", "Standplaats: Adres", "Standplaats: Plaats", "Standplaats: Land"],
+                ["CHAR01", "Trekker + Oplegger", "Diesel", "Vast", "Teststraat 1", "Utrecht", "Nederland"],
+                ["CHAR02", "Bakwagen", "Diesel", "Flex", "Teststraat 1", "Utrecht", "Nederland"],
+            ]),
+            WorksheetXml([
+                ["Standplaats: Adres", "Standplaats: Plaats", "Standplaats: Land", "Aantal wagens"],
+                ["Teststraat 1", "Utrecht", "Nederland", "2"],
+            ]));
+    }
+
+    private static void AddWorkbookScaffold(
+        ZipArchive archive,
+        string firstSheetName,
+        string secondSheetName,
+        string firstSheetXml,
+        string secondSheetXml)
+    {
         AddText(archive, "[Content_Types].xml",
             """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -40,20 +80,13 @@ internal static class TestXlsxData
             <?xml version="1.0" encoding="UTF-8"?>
             <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
               <sheets>
-                <sheet name="Voertuigen" sheetId="1" r:id="rId1"/>
-                <sheet name="Aantallen" sheetId="2" r:id="rId2"/>
+                <sheet name="{0}" sheetId="1" r:id="rId1"/>
+                <sheet name="{1}" sheetId="2" r:id="rId2"/>
               </sheets>
             </workbook>
-            """);
-        AddText(archive, "xl/worksheets/sheet1.xml", WorksheetXml([
-            ["Voertuig: Wagencode", "Type voertuig", "Brandstoftype", "Inzet type", "Standplaats: Adres", "Standplaats: Plaats", "Standplaats: Land"],
-            ["CHAR01", "Trekker + Oplegger", "Diesel", "Vast", "Teststraat 1", "Utrecht", "Nederland"],
-            ["CHAR02", "Bakwagen", "Diesel", "Flex", "Teststraat 1", "Utrecht", "Nederland"],
-        ]));
-        AddText(archive, "xl/worksheets/sheet2.xml", WorksheetXml([
-            ["Standplaats: Adres", "Standplaats: Plaats", "Standplaats: Land", "Aantal wagens"],
-            ["Teststraat 1", "Utrecht", "Nederland", "2"],
-        ]));
+            """.Replace("{0}", SecurityElement.Escape(firstSheetName)).Replace("{1}", SecurityElement.Escape(secondSheetName)));
+        AddText(archive, "xl/worksheets/sheet1.xml", firstSheetXml);
+        AddText(archive, "xl/worksheets/sheet2.xml", secondSheetXml);
     }
 
     private static string WorksheetXml(IReadOnlyList<IReadOnlyList<string>> rows)

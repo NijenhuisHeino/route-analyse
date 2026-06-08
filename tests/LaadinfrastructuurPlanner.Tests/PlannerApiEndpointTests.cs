@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -151,6 +152,47 @@ public sealed class PlannerApiEndpointTests : IDisposable
         Assert.NotEmpty(diagnostics.Assumptions);
     }
 
+    [Fact]
+    public async Task FleetStandplaatsenDoNotFailWhenOnlineGeocodingTimesOut()
+    {
+        var cacheDir = Path.Combine(_root, ".cache");
+        TestParquetData.WriteAll(cacheDir);
+        var fleetPath = Path.Combine(cacheDir, "ev_wagenpark_standplaatsen.xlsx");
+        TestXlsxData.WritePostNlStandplaatsen(fleetPath);
+        Directory.CreateDirectory(Path.Combine(cacheDir, "planner"));
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<RouteAnalysisOptions>();
+                    services.RemoveAll<IHttpClientFactory>();
+                    services.AddSingleton(new RouteAnalysisOptions
+                    {
+                        RepoRoot = _root,
+                        CacheDir = cacheDir,
+                        UploadedDatasetDir = Path.Combine(cacheDir, "uploaded-dataset", "active"),
+                        DuckDbPath = Path.Combine(cacheDir, "planner", "route-analysis.duckdb"),
+                        ManifestPath = Path.Combine(cacheDir, "planner", "manifest.json"),
+                        FleetExcelPath = fleetPath,
+                    });
+                    services.AddSingleton<IHttpClientFactory>(new CancelingHttpClientFactory());
+                });
+            });
+
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/fleet/standplaatsen");
+        response.EnsureSuccessStatusCode();
+        var standplaatsen = await response.Content.ReadFromJsonAsync<FleetDepotsResponse>();
+
+        Assert.NotNull(standplaatsen);
+        Assert.Equal("ok", standplaatsen.Status);
+        Assert.Equal(1, standplaatsen.TotalVehicles);
+        Assert.Empty(standplaatsen.Depots);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -164,5 +206,16 @@ public sealed class PlannerApiEndpointTests : IDisposable
         var response = await client.PostAsJsonAsync(path, payload);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<T>())!;
+    }
+
+    private sealed class CancelingHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(new CancelingHandler());
+    }
+
+    private sealed class CancelingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => throw new TaskCanceledException("Simulated geocoder timeout.");
     }
 }
