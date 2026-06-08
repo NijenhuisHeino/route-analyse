@@ -47,6 +47,23 @@ public sealed class LayerInfoUiTests
         Assert.Contains(".layer-info-panel", css);
     }
 
+    [Fact]
+    public void HomePageKeepsMapSelectionAsLeadingContext()
+    {
+        var home = File.ReadAllText(Path.Combine(
+            RepoRoot,
+            "src",
+            "LaadinfrastructuurPlanner",
+            "Components",
+            "Pages",
+            "Home.razor"));
+
+        Assert.Contains("HasActiveMapSelection", home);
+        Assert.Contains("Kaartselectie actief", home);
+        Assert.Contains("@if (!HasActiveMapSelection)", home);
+        Assert.Contains("Pauzelaadvraag per uur", home);
+    }
+
     private static void AssertLayerInfo(string home, string id, string label, string expectedExplanation)
     {
         Assert.Contains($"ToggleLayerInfo(\"{id}\")", home);

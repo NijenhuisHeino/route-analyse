@@ -860,6 +860,17 @@ td span,
   font-size: 13px;
 }
 
+.selection-context-note {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--eta-border);
+  background: #fff8e1;
+  color: #7c4a03;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .selection-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -898,10 +909,67 @@ td span,
   text-align: right;
 }
 
+.compact-heading {
+  margin-bottom: 8px;
+}
+
 .histogram,
 .window-list {
   display: grid;
   gap: 8px;
+}
+
+.road-break-hour-card {
+  margin-bottom: 12px;
+}
+
+.road-break-hour-heatmap {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(46px, 1fr));
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.road-break-hour-cell {
+  min-width: 46px;
+  min-height: 72px;
+  padding: 7px 5px;
+  border: 1px solid rgba(245, 158, 11, calc(var(--break-alpha) + 0.06));
+  border-radius: 6px;
+  background: linear-gradient(
+    180deg,
+    rgba(250, 204, 21, var(--break-alpha)),
+    rgba(249, 115, 22, var(--break-alpha))
+  );
+  color: var(--eta-purple);
+  display: grid;
+  align-content: space-between;
+  justify-items: center;
+}
+
+.road-break-hour-cell.is-empty {
+  border-color: var(--eta-border);
+  background: #f7f7fa;
+  color: rgba(46, 35, 67, 0.46);
+}
+
+.road-break-hour-cell span,
+.road-break-hour-cell em {
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.road-break-hour-cell strong {
+  font-size: 12px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.road-break-hour-cell em {
+  color: rgba(46, 35, 67, 0.74);
 }
 
 .hour-heatmap {

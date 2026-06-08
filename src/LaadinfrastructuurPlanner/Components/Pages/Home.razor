@@ -619,10 +619,14 @@
                 <div class="panel-heading">
                     <div>
                         <h3>@SelectedDetail.Title</h3>
-                        <span>@SelectionTypeLabel(SelectedDetail.SelectionType)</span>
+                        <span>Kaartselectie actief · @SelectionTypeLabel(SelectedDetail.SelectionType)</span>
                     </div>
                     <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
                 </div>
+
+                <p class="selection-context-note">
+                    Alle grafieken, heatmaps en tabellen hieronder horen alleen bij het object dat je op de kaart hebt aangeklikt.
+                </p>
 
                 @if (!string.IsNullOrWhiteSpace(SelectedDetail.Message))
                 {
@@ -765,6 +769,24 @@
                         </div>
                         @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
                         {
+                            <div class="road-break-hour-card">
+                                <div class="card-heading compact-heading">
+                                    <strong>Pauzelaadvraag per uur</strong>
+                                    <span>24-uurs heatmap voor alleen dit aangeklikte wegvlak</span>
+                                </div>
+                                <div class="road-break-hour-heatmap" aria-label="Pauzelaadvraag per uur voor geselecteerd wegvlak">
+                                    @foreach (var hour in SelectedRoadBreakDemand.HourlyProfile.OrderBy(x => x.Hour))
+                                    {
+                                        <div class="@RoadBreakHourCellClass(hour)"
+                                             style="@RoadBreakHourCellStyle(hour)"
+                                             title="@($"{hour.Label}: {hour.Vehicles:N0} voertuigen · {FormatPower(hour.RequiredKw)} piek · {hour.DemandKwh:N0} kWh")">
+                                            <span>@hour.Hour.ToString("00")</span>
+                                            <strong>@FormatPower(hour.RequiredKw)</strong>
+                                            <em>@hour.Vehicles.ToString("N0")</em>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
                             <div class="window-list">
                                 @foreach (var slot in SelectedRoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
                                 {
@@ -871,85 +893,88 @@
             </section>
         }
 
-        <section class="content-grid">
-            <div class="table-panel">
-                <div class="panel-heading">
-                    <h3>Top stoplocaties</h3>
-                    <span>@(Dashboard?.TopStops.Length ?? 0) locaties</span>
-                </div>
-                <div class="table-scroll">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Locatie</th>
-                                <th>Voertuigen</th>
-                                <th>Stops</th>
-                                <th>Ritten</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
-                            {
+        @if (!HasActiveMapSelection)
+        {
+            <section class="content-grid">
+                <div class="table-panel">
+                    <div class="panel-heading">
+                        <h3>Top stoplocaties</h3>
+                        <span>@(Dashboard?.TopStops.Length ?? 0) locaties</span>
+                    </div>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
                                 <tr>
-                                    <td>
-                                        <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
-                                        <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
-                                    </td>
-                                    <td>@row.Wagens</td>
-                                    <td>@row.Stops</td>
-                                    <td>@row.Trips</td>
+                                    <th>Locatie</th>
+                                    <th>Voertuigen</th>
+                                    <th>Stops</th>
+                                    <th>Ritten</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
+                                {
+                                    <tr>
+                                        <td>
+                                            <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
+                                            <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
+                                        </td>
+                                        <td>@row.Wagens</td>
+                                        <td>@row.Stops</td>
+                                        <td>@row.Trips</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
 
-            <div class="table-panel">
-                <div class="panel-heading">
-                    <h3>Wegvlakken</h3>
-                    <span>@RoadStatusLabel(Dashboard?.RoadStatus)</span>
-                </div>
-                <div class="table-scroll">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Segment</th>
-                                <th>Rijrichting</th>
-                                <th>Lengte</th>
-                                <th>Voertuigen</th>
-                                <th>Passages</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
-                            {
+                <div class="table-panel">
+                    <div class="panel-heading">
+                        <h3>Wegvlakken</h3>
+                        <span>@RoadStatusLabel(Dashboard?.RoadStatus)</span>
+                    </div>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
                                 <tr>
-                                    <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
-                                    <td>@row.Direction</td>
-                                    <td>@row.LengthKm.ToString("N1") km</td>
-                                    <td>@row.UniqueWagens</td>
-                                    <td>@row.Passes</td>
+                                    <th>Segment</th>
+                                    <th>Rijrichting</th>
+                                    <th>Lengte</th>
+                                    <th>Voertuigen</th>
+                                    <th>Passages</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
+                                {
+                                    <tr>
+                                        <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
+                                        <td>@row.Direction</td>
+                                        <td>@row.LengthKm.ToString("N1") km</td>
+                                        <td>@row.UniqueWagens</td>
+                                        <td>@row.Passes</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <section class="simulation-panel">
-            <div class="panel-heading">
-                <h3>Laadstrategie</h3>
-                <button @onclick="RunSimulationAsync" disabled="@IsBusy">Bereken laadniveau</button>
-            </div>
-            <div class="metric-row compact">
-                <div class="metric"><span>Laadmomenten</span><strong>@FormatNumber(Simulation?.ChargeEvents)</strong></div>
-                <div class="metric"><span>Ritten met laden</span><strong>@FormatNumber(Simulation?.TripsWithChargeEvent)</strong></div>
-                <div class="metric"><span>kWh</span><strong>@FormatNumber(Simulation?.TotalKwh)</strong></div>
-                <div class="metric"><span>Laaduren</span><strong>@FormatNumber(Simulation?.TotalChargeHours)</strong></div>
-            </div>
-        </section>
+            <section class="simulation-panel">
+                <div class="panel-heading">
+                    <h3>Laadstrategie</h3>
+                    <button @onclick="RunSimulationAsync" disabled="@IsBusy">Bereken laadniveau</button>
+                </div>
+                <div class="metric-row compact">
+                    <div class="metric"><span>Laadmomenten</span><strong>@FormatNumber(Simulation?.ChargeEvents)</strong></div>
+                    <div class="metric"><span>Ritten met laden</span><strong>@FormatNumber(Simulation?.TripsWithChargeEvent)</strong></div>
+                    <div class="metric"><span>kWh</span><strong>@FormatNumber(Simulation?.TotalKwh)</strong></div>
+                    <div class="metric"><span>Laaduren</span><strong>@FormatNumber(Simulation?.TotalChargeHours)</strong></div>
+                </div>
+            </section>
+        }
     </main>
 </div>
 
@@ -1065,6 +1090,7 @@
     private bool ChargerAccessPrivate { get; set; }
     private string? OpenLayerInfoId { get; set; }
     private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
+    private bool HasActiveMapSelection => SelectedDetail is not null;
 
     private void ToggleLayerInfo(string layerId)
     {
@@ -1718,6 +1744,21 @@
         var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
         var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.12 + 0.78 * intensity;
         return $"--hour-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private string RoadBreakHourCellClass(HourlyDemandCell cell)
+    {
+        return cell.RequiredKw > 0 || cell.Vehicles > 0
+            ? "road-break-hour-cell has-demand"
+            : "road-break-hour-cell is-empty";
+    }
+
+    private string RoadBreakHourCellStyle(HourlyDemandCell cell)
+    {
+        var max = SelectedRoadBreakDemand?.HourlyProfile.Select(x => x.RequiredKw).DefaultIfEmpty(0).Max() ?? 0;
+        var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
+        var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.16 + 0.74 * intensity;
+        return $"--break-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
     }
 
     private static string PowerCellStyle(double requiredKw, IReadOnlyCollection<PowerLocationProfile> profiles)

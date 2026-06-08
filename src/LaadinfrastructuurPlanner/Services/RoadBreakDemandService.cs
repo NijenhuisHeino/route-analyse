@@ -84,6 +84,7 @@ public sealed partial class RouteAnalysisService
                 vehicles,
                 selected.LongLength,
                 profile,
+                BuildRoadBreakHourlyProfile(selected, normalized.BreakDurationHours),
                 selected.Select(ToRoadBreakVehicleRow).ToArray(),
                 diagnostics);
         });
@@ -355,6 +356,50 @@ public sealed partial class RouteAnalysisService
             .ToArray();
     }
 
+    private static HourlyDemandCell[] BuildRoadBreakHourlyProfile(
+        IReadOnlyList<RoadBreakEvent> events,
+        double breakDurationHours)
+    {
+        var loads = ExpandRoadBreakQuarterLoads(events, breakDurationHours);
+        var loadsByHour = loads
+            .GroupBy(x => x.SlotStart.Hour)
+            .ToDictionary(x => x.Key, x => x.ToArray());
+
+        return Enumerable.Range(0, 24)
+            .Select(hour =>
+            {
+                if (!loadsByHour.TryGetValue(hour, out var hourLoads))
+                {
+                    return new HourlyDemandCell(hour, $"{hour:00}:00", 0, 0, 0, 0, 0);
+                }
+
+                var peakKw = hourLoads
+                    .GroupBy(x => x.SlotStart)
+                    .Select(slot => slot.Sum(x => x.Event.RequiredKw))
+                    .DefaultIfEmpty(0)
+                    .Max();
+                var vehicles = hourLoads
+                    .Select(x => VehicleDemandKey(x.Event.Wagencode, x.Event.Kenteken))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .LongCount();
+                var eventsInHour = hourLoads
+                    .Select(x => new { x.Event.Wagencode, x.Event.Kenteken, x.Event.BreakStart })
+                    .Distinct()
+                    .LongCount();
+                var demandKwh = hourLoads.Sum(x => x.Event.RequiredKw * x.OverlapHours);
+
+                return new HourlyDemandCell(
+                    hour,
+                    $"{hour:00}:00",
+                    vehicles,
+                    eventsInHour,
+                    Math.Round(demandKwh, 1),
+                    Math.Round(peakKw, 1),
+                    Math.Round(peakKw / 1000.0, 3));
+            })
+            .ToArray();
+    }
+
     private static RoadBreakVehicleRow ToRoadBreakVehicleRow(RoadBreakEvent row)
     {
         return new RoadBreakVehicleRow(
@@ -464,6 +509,7 @@ public sealed partial class RouteAnalysisService
             0,
             0,
             0,
+            [],
             [],
             [],
             new RoadBreakDemandDiagnostics(0, 0, 0, 0, ["included: 0 break-window passages"]));

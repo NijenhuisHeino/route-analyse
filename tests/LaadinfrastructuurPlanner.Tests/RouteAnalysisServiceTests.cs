@@ -364,6 +364,23 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandDetailReturnsTwentyFourHourHeatmapForSelectedRoad()
+    {
+        var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(53.0, 6.0, 51.9, 4.5, 100),
+            KwhPerKm = 1.0,
+            BreakDurationHours = 0.75
+        });
+
+        Assert.Equal("ok", detail.Status);
+        Assert.Equal(24, detail.HourlyProfile.Length);
+        Assert.Equal(Enumerable.Range(0, 24), detail.HourlyProfile.Select(x => x.Hour));
+        Assert.Contains(detail.HourlyProfile, hour => hour.RequiredKw > 0 && hour.Vehicles > 0 && hour.DemandKwh > 0);
+        Assert.Equal(detail.PeakMw, Math.Round(detail.HourlyProfile.Max(x => x.RequiredMw), 3));
+    }
+
+    [Fact]
     public async Task RoadBreakDemandResetsOnlyAfterLongGapAtResetLocation()
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest

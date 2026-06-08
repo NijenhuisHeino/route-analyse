@@ -258,6 +258,7 @@ public sealed record RoadBreakDemandDetailResponse(
     long Vehicles,
     long Passages,
     RoadBreakQuarterCell[] QuarterProfile,
+    HourlyDemandCell[] HourlyProfile,
     RoadBreakVehicleRow[] VehiclesInWindow,
     RoadBreakDemandDiagnostics Diagnostics);
 
