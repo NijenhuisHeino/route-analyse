@@ -64,6 +64,24 @@ public sealed class LayerInfoUiTests
         Assert.Contains("Pauzelaadvraag per uur", home);
     }
 
+    [Fact]
+    public void HomePageShowsFilterableSortableRoadTableBelowMap()
+    {
+        var home = File.ReadAllText(Path.Combine(
+            RepoRoot,
+            "src",
+            "LaadinfrastructuurPlanner",
+            "Components",
+            "Pages",
+            "Home.razor"));
+
+        Assert.Contains("Wegvlakken onder de kaart", home);
+        Assert.Contains("RoadTableFilter", home);
+        Assert.Contains("SetRoadSort", home);
+        Assert.Contains("RoadDisplayName", home);
+        Assert.Contains("Passages</button>", home);
+    }
+
     private static void AssertLayerInfo(string home, string id, string label, string expectedExplanation)
     {
         Assert.Contains($"ToggleLayerInfo(\"{id}\")", home);

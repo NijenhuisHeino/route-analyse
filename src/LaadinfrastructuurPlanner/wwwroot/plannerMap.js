@@ -74,6 +74,7 @@ window.routePlannerMap = (() => {
         type: "Feature",
         properties: {
           segmentId: line.segmentId || "",
+          roadName: line.roadName || "",
           weight: line.passes || line.uniqueWagens || 1,
           vehicles: line.uniqueWagens || 1,
           passes: line.passes || 0,

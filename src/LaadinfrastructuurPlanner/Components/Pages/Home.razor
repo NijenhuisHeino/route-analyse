@@ -613,6 +613,57 @@
             </div>
         </section>
 
+        @if (!HasActiveMapSelection)
+        {
+            <section class="table-panel map-road-table-panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Wegvlakken onder de kaart</h3>
+                        <span>@MapRoadRows().Count().ToString("N0") van @(Dashboard?.TopRoadSegments.Length ?? 0).ToString("N0") wegvlakken</span>
+                    </div>
+                </div>
+                <div class="table-filter-row">
+                    <label>
+                        Filter wegvlak
+                        <input placeholder="zoek op A2, A6, richting of coordinaten" @bind="RoadTableFilter" @bind:event="oninput" />
+                    </label>
+                    <div class="sort-button-group" aria-label="Sorteer wegvlakken">
+                        <button type="button" class="@RoadSortClass("passes")" @onclick='() => SetRoadSort("passes")'>Passages</button>
+                        <button type="button" class="@RoadSortClass("vehicles")" @onclick='() => SetRoadSort("vehicles")'>Voertuigen</button>
+                        <button type="button" class="@RoadSortClass("name")" @onclick='() => SetRoadSort("name")'>Weg</button>
+                        <button type="button" class="@RoadSortClass("length")" @onclick='() => SetRoadSort("length")'>Lengte</button>
+                    </div>
+                </div>
+                <div class="table-scroll road-table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Weg</th>
+                                <th>Rijrichting</th>
+                                <th>Locatie</th>
+                                <th>Lengte</th>
+                                <th>Voertuigen</th>
+                                <th>Passages</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in MapRoadRows())
+                            {
+                                <tr>
+                                    <td><strong>@RoadDisplayName(row)</strong></td>
+                                    <td>@row.Direction</td>
+                                    <td><span>@RoadCoordinateLabel(row)</span></td>
+                                    <td>@row.LengthKm.ToString("N1") km</td>
+                                    <td>@row.UniqueWagens.ToString("N0")</td>
+                                    <td>@row.Passes.ToString("N0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
         @if (SelectedDetail is not null)
         {
             <section id="selection-detail" class="selection-panel map-selection-detail">
@@ -1058,6 +1109,9 @@
     private string DateToText { get; set; } = "";
     private string VervoerdersText { get; set; } = "";
     private string WagencodesText { get; set; } = "";
+    private string RoadTableFilter { get; set; } = "";
+    private string RoadTableSort { get; set; } = "passes";
+    private bool RoadTableDescending { get; set; } = true;
     private double MinDwellMin { get; set; }
     private int RoadThreshold { get; set; } = 1;
     private int RoadTopPercent { get; set; } = 1;
@@ -1124,8 +1178,6 @@
         {
             DateToText = Metadata.MaxDate.Value.ToString("yyyy-MM-dd");
         }
-
-        await LoadDataAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1135,7 +1187,9 @@
             MapCallbacks = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("routePlannerMap.init", "route-map", MapCallbacks);
             MapReady = true;
+            await LoadDataAsync();
             await RefreshMapAsync();
+            StateHasChanged();
         }
 
         if (PendingSelectionScroll && MapReady && SelectedDetail is not null)
@@ -1817,6 +1871,68 @@
     private static string DisplayValue(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? "-" : value;
+    }
+
+    private void SetRoadSort(string sort)
+    {
+        if (RoadTableSort == sort)
+        {
+            RoadTableDescending = !RoadTableDescending;
+            return;
+        }
+
+        RoadTableSort = sort;
+        RoadTableDescending = sort is not "name";
+    }
+
+    private string RoadSortClass(string sort)
+    {
+        return RoadTableSort == sort
+            ? $"active {(RoadTableDescending ? "desc" : "asc")}"
+            : "";
+    }
+
+    private IEnumerable<RoadLine> MapRoadRows()
+    {
+        IEnumerable<RoadLine> rows = Dashboard?.TopRoadSegments ?? [];
+        var query = RoadTableFilter.Trim();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            rows = rows.Where(row =>
+                RoadDisplayName(row).Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.Direction.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || RoadCoordinateLabel(row).Contains(query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        rows = RoadTableSort switch
+        {
+            "vehicles" => RoadTableDescending
+                ? rows.OrderByDescending(x => x.UniqueWagens).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(x => x.UniqueWagens).ThenBy(x => x.Passes),
+            "name" => RoadTableDescending
+                ? rows.OrderByDescending(RoadDisplayName, StringComparer.OrdinalIgnoreCase).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(RoadDisplayName, StringComparer.OrdinalIgnoreCase).ThenByDescending(x => x.Passes),
+            "length" => RoadTableDescending
+                ? rows.OrderByDescending(x => x.LengthKm).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(x => x.LengthKm).ThenByDescending(x => x.Passes),
+            _ => RoadTableDescending
+                ? rows.OrderByDescending(x => x.Passes).ThenByDescending(x => x.UniqueWagens)
+                : rows.OrderBy(x => x.Passes).ThenBy(x => x.UniqueWagens)
+        };
+
+        return rows.Take(100);
+    }
+
+    private static string RoadDisplayName(RoadLine row)
+    {
+        return string.IsNullOrWhiteSpace(row.RoadName)
+            ? $"Wegvlak bij {((row.Lat1 + row.Lat2) / 2):0.000}, {((row.Lon1 + row.Lon2) / 2):0.000}"
+            : row.RoadName;
+    }
+
+    private static string RoadCoordinateLabel(RoadLine row)
+    {
+        return $"{((row.Lat1 + row.Lat2) / 2):0.000}, {((row.Lon1 + row.Lon2) / 2):0.000}";
     }
 
     private int EmptyWeekCellCount()

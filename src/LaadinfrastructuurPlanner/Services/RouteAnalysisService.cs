@@ -808,6 +808,7 @@ public sealed partial class RouteAnalysisService
         var segmentId = string.Create(
             CultureInfo.InvariantCulture,
             $"weg:{DirectionBucket(bearing)}:{midLat:0.000}:{midLon:0.000}:{chain.Count}");
+        var roadName = InferRoadName((lat1 + lat2) / 2.0, (lon1 + lon2) / 2.0);
         return new RoadLine(
             Math.Round(lat1, 6),
             Math.Round(lon1, 6),
@@ -816,12 +817,50 @@ public sealed partial class RouteAnalysisService
             chain.Max(edge => edge.UniqueWagens),
             chain.Max(edge => edge.Passes),
             segmentId,
+            roadName,
             CompassDirection(bearing),
             Math.Round(bearing, 0),
             lengthKm,
             chain.Count,
             Math.Round(Math.Clamp(lengthKm / 2.0 + 1.5, 1.5, 20), 2),
             simplified);
+    }
+
+    private static string InferRoadName(double lat, double lon)
+    {
+        var best = KnownRoadCorridors
+            .Select(corridor => new
+            {
+                corridor.Name,
+                DistanceKm = DistanceToPolylineKm(lat, lon, corridor.Points)
+            })
+            .OrderBy(x => x.DistanceKm)
+            .FirstOrDefault();
+
+        return best is not null && best.DistanceKm <= 3.0
+            ? best.Name
+            : string.Create(CultureInfo.InvariantCulture, $"Wegvlak bij {lat:0.000}, {lon:0.000}");
+    }
+
+    private static double DistanceToPolylineKm(double lat, double lon, IReadOnlyList<RoadPoint> points)
+    {
+        if (points.Count == 0)
+        {
+            return double.MaxValue;
+        }
+
+        if (points.Count == 1)
+        {
+            return HaversineKm(lat, lon, points[0].Lat, points[0].Lon);
+        }
+
+        var min = double.MaxValue;
+        for (var i = 0; i < points.Count - 1; i++)
+        {
+            min = Math.Min(min, DistancePointToSegmentKm(lat, lon, points[i].Lat, points[i].Lon, points[i + 1].Lat, points[i + 1].Lon));
+        }
+
+        return min;
     }
 
     private static RoadPoint[] SimplifyRoadPoints(IReadOnlyList<RoadPoint> points)
@@ -1341,6 +1380,29 @@ public sealed partial class RouteAnalysisService
     }
 
     private static double DegreesToRadians(double degrees) => degrees * Math.PI / 180.0;
+
+    private static readonly KnownRoadCorridor[] KnownRoadCorridors =
+    [
+        new("A1", [new(52.36, 4.95), new(52.23, 5.18), new(52.20, 5.45), new(52.22, 5.96), new(52.24, 6.16), new(52.26, 6.79)]),
+        new("A2", [new(52.37, 4.90), new(52.09, 5.04), new(52.02, 5.12), new(51.69, 5.31), new(51.44, 5.47), new(51.21, 5.71), new(50.85, 5.69)]),
+        new("A4", [new(52.39, 4.80), new(52.17, 4.46), new(52.06, 4.34), new(51.91, 4.47), new(51.49, 4.28)]),
+        new("A6", [new(52.33, 5.15), new(52.40, 5.25), new(52.52, 5.45), new(52.65, 5.73), new(52.77, 5.83)]),
+        new("A7", [new(52.93, 5.04), new(53.04, 5.66), new(53.20, 6.57), new(53.19, 6.74)]),
+        new("A9", [new(52.31, 4.75), new(52.29, 4.94), new(52.32, 5.10)]),
+        new("A10", [new(52.39, 4.78), new(52.43, 4.88), new(52.39, 4.98), new(52.33, 4.89), new(52.36, 4.80)]),
+        new("A12", [new(52.05, 4.32), new(52.07, 4.65), new(52.07, 5.12), new(52.05, 5.34), new(52.03, 5.66), new(52.00, 6.00)]),
+        new("A15", [new(51.89, 4.34), new(51.88, 4.65), new(51.89, 5.05), new(51.87, 5.46), new(51.88, 5.85)]),
+        new("A16", [new(51.92, 4.47), new(51.81, 4.64), new(51.59, 4.78), new(51.49, 4.74)]),
+        new("A20", [new(51.96, 4.18), new(51.92, 4.38), new(51.92, 4.54), new(51.95, 4.67)]),
+        new("A27", [new(51.58, 4.78), new(51.70, 4.86), new(51.89, 5.00), new(52.05, 5.15), new(52.22, 5.18), new(52.31, 5.24)]),
+        new("A28", [new(52.09, 5.12), new(52.16, 5.37), new(52.35, 5.65), new(52.55, 6.09), new(52.69, 6.19), new(52.79, 6.48)]),
+        new("A50", [new(51.66, 5.62), new(51.75, 5.73), new(51.93, 5.83), new(52.12, 5.97), new(52.24, 6.00), new(52.38, 6.08)]),
+        new("A58", [new(51.43, 3.57), new(51.50, 4.30), new(51.56, 4.77), new(51.55, 5.09), new(51.44, 5.48)]),
+        new("A67", [new(51.37, 5.22), new(51.39, 5.48), new(51.37, 5.77), new(51.34, 6.05), new(51.35, 6.17)]),
+        new("A73", [new(51.83, 5.86), new(51.68, 5.91), new(51.44, 6.02), new(51.20, 6.02), new(50.88, 5.97)])
+    ];
+
+    private sealed record KnownRoadCorridor(string Name, RoadPoint[] Points);
 
     private sealed record SimStop(
         string Wagencode,

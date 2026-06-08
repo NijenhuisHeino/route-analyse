@@ -94,6 +94,7 @@ public sealed class RouteAnalysisServiceTests : IDisposable
         var line = roads.Lines.First(candidate => candidate.RawSegments >= 2);
         Assert.Equal(2, line.RawSegments);
         Assert.Contains("richting", line.Direction, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(line.RoadName));
         Assert.True(line.LengthKm > 0);
         Assert.NotNull(line.Coordinates);
         Assert.True(line.Coordinates!.Length >= 3);

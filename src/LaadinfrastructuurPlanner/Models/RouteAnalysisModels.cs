@@ -98,6 +98,7 @@ public sealed record RoadLine(
     int UniqueWagens,
     int Passes,
     string SegmentId = "",
+    string RoadName = "",
     string Direction = "",
     double Bearing = 0,
     double LengthKm = 0,
