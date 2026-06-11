@@ -416,26 +416,15 @@ public sealed partial class RouteAnalysisService
 
     private RoadBreakDemandRequest NormalizeRoadBreakDemandRequest(RoadBreakDemandRequest request)
     {
-        var normalized = NormalizeFilter(request);
         var start = Math.Clamp(request.WindowStartHours, 0.5, 12);
-        var end = Math.Clamp(request.WindowEndHours, start + 0.25, 14);
-        return request with
+        return (RoadBreakDemandRequest)NormalizeFilter(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
             RoadTopPercent = Math.Clamp(request.RoadTopPercent, 0, 100),
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
             KwhPerKm = Math.Clamp(request.KwhPerKm, 0.1, 5),
             CapacityKwh = Math.Clamp(request.CapacityKwh, 100, 1_500),
             TargetSocPct = Math.Clamp(request.TargetSocPct, 20, 100),
             WindowStartHours = start,
-            WindowEndHours = end,
+            WindowEndHours = Math.Clamp(request.WindowEndHours, start + 0.25, 14),
             BreakDurationHours = Math.Clamp(request.BreakDurationHours, 0.25, 3),
             ShiftResetGapHours = Math.Clamp(request.ShiftResetGapHours, 0.5, 12),
             ResetLocationRadiusKm = Math.Clamp(request.ResetLocationRadiusKm, 0.1, 5),
@@ -445,29 +434,9 @@ public sealed partial class RouteAnalysisService
 
     private RoadBreakDemandDetailRequest NormalizeRoadBreakDemandDetailRequest(RoadBreakDemandDetailRequest request)
     {
-        var normalized = NormalizeRoadBreakDemandRequest(request);
         var road = request.Road;
-        return request with
+        return (RoadBreakDemandDetailRequest)NormalizeRoadBreakDemandRequest(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
-            KwhPerKm = normalized.KwhPerKm,
-            CapacityKwh = normalized.CapacityKwh,
-            TargetSocPct = normalized.TargetSocPct,
-            WindowStartHours = normalized.WindowStartHours,
-            WindowEndHours = normalized.WindowEndHours,
-            BreakDurationHours = normalized.BreakDurationHours,
-            ShiftResetGapHours = normalized.ShiftResetGapHours,
-            ResetLocationRadiusKm = normalized.ResetLocationRadiusKm,
-            MaxAverageSpeedKmh = normalized.MaxAverageSpeedKmh,
             Road = road with
             {
                 Lat1 = Math.Clamp(road.Lat1, -90, 90),
@@ -661,20 +630,16 @@ public sealed partial class RouteAnalysisService
         return start + (end - start) * progress;
     }
 
+    /// <summary>
+    /// Projecteert (mogelijk een detailrequest) naar een kale RoadBreakDemandRequest zodat de
+    /// event-berekening één cache-entry deelt, ongeacht weg-selectie of top-filters.
+    /// </summary>
     private static RoadBreakDemandRequest ToRoadBreakEventRequest(RoadBreakDemandRequest request)
     {
-        return new RoadBreakDemandRequest
+        return new RoadBreakDemandRequest(request)
         {
-            DateFrom = request.DateFrom,
-            DateTo = request.DateTo,
-            VervoerderTypes = request.VervoerderTypes,
-            Vervoerders = request.Vervoerders,
-            Wagencodes = request.Wagencodes,
-            MinDwellMin = request.MinDwellMin,
             RoadThreshold = 1,
             RoadTopPercent = 100,
-            MarkerTopN = request.MarkerTopN,
-            ZeZoneMode = request.ZeZoneMode,
             KwhPerKm = request.KwhPerKm,
             CapacityKwh = request.CapacityKwh,
             TargetSocPct = request.TargetSocPct,

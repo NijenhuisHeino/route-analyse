@@ -93,19 +93,7 @@ public sealed partial class RouteAnalysisService
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
-            var powerFilter = new PowerProfileRequest
-            {
-                DateFrom = normalized.DateFrom,
-                DateTo = normalized.DateTo,
-                VervoerderTypes = normalized.VervoerderTypes,
-                Vervoerders = normalized.Vervoerders,
-                Wagencodes = normalized.Wagencodes,
-                MinDwellMin = normalized.MinDwellMin,
-                RoadThreshold = normalized.RoadThreshold,
-                RoadTopPercent = normalized.RoadTopPercent,
-                MarkerTopN = normalized.MarkerTopN,
-                ZeZoneMode = normalized.ZeZoneMode,
-            };
+            var powerFilter = new PowerProfileRequest(normalized);
             var where = BuildPowerWhere(powerFilter, onlyChargeWindows: false);
             var chargeWhere = BuildPowerWhere(powerFilter, onlyChargeWindows: true);
 
@@ -559,19 +547,8 @@ public sealed partial class RouteAnalysisService
 
     private PowerProfileRequest NormalizePowerRequest(PowerProfileRequest request)
     {
-        var normalized = NormalizeFilter(request);
-        return new PowerProfileRequest
+        return (PowerProfileRequest)NormalizeFilter(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
             VehicleClasses = NormalizeVehicleClasses(request.VehicleClasses),
             TopLocations = Math.Clamp(request.TopLocations, 1, 50),
             ScenarioYears = (request.ScenarioYears.Length == 0 ? [2027, 2030] : request.ScenarioYears)
@@ -587,25 +564,8 @@ public sealed partial class RouteAnalysisService
 
     private PowerLocationProfileRequest NormalizePowerLocationRequest(PowerLocationProfileRequest request)
     {
-        var normalized = NormalizePowerRequest(request);
-        return new PowerLocationProfileRequest
+        return (PowerLocationProfileRequest)NormalizePowerRequest(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
-            VehicleClasses = normalized.VehicleClasses,
-            TopLocations = normalized.TopLocations,
-            ScenarioYears = normalized.ScenarioYears,
-            ScenarioMode = normalized.ScenarioMode,
-            CapacityKwh = normalized.CapacityKwh,
-            MaxVehicleKw = normalized.MaxVehicleKw,
             LocationId = request.LocationId.Trim(),
         };
     }

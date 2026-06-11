@@ -398,33 +398,15 @@ public sealed partial class RouteAnalysisService
     {
         if (string.Equals(request.SelectionType, "road", StringComparison.OrdinalIgnoreCase) && request.Road is not null)
         {
-            return GetRoadSelectionAsync(new RoadSelectionRequest
+            return GetRoadSelectionAsync(new RoadSelectionRequest(request)
             {
-                DateFrom = request.DateFrom,
-                DateTo = request.DateTo,
-                VervoerderTypes = request.VervoerderTypes,
-                Vervoerders = request.Vervoerders,
-                Wagencodes = request.Wagencodes,
-                MinDwellMin = request.MinDwellMin,
-                RoadThreshold = request.RoadThreshold,
-                RoadTopPercent = request.RoadTopPercent,
-                MarkerTopN = request.MarkerTopN,
                 Road = request.Road,
                 Scenario = request.Scenario,
             }, cancellationToken);
         }
 
-        return GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest
+        return GetOvernightLocationDetailAsync(new OvernightLocationDetailRequest(request)
         {
-            DateFrom = request.DateFrom,
-            DateTo = request.DateTo,
-            VervoerderTypes = request.VervoerderTypes,
-            Vervoerders = request.Vervoerders,
-            Wagencodes = request.Wagencodes,
-            MinDwellMin = request.MinDwellMin,
-            RoadThreshold = request.RoadThreshold,
-            RoadTopPercent = request.RoadTopPercent,
-            MarkerTopN = request.MarkerTopN,
             DepotId = request.DepotId ?? "",
             Scenario = request.Scenario,
         }, cancellationToken);
@@ -908,34 +890,12 @@ public sealed partial class RouteAnalysisService
             false);
     }
 
+    // NormalizeFilter gebruikt een record-`with` en behoudt daarmee het runtime-type,
+    // zodat afgeleide requests veilig terug te casten zijn.
     private OvernightLocationsRequest NormalizeOvernightRequest(OvernightLocationsRequest request)
     {
-        var filter = new AnalysisFilter
+        return (OvernightLocationsRequest)NormalizeFilter(request) with
         {
-            DateFrom = request.DateFrom,
-            DateTo = request.DateTo,
-            VervoerderTypes = request.VervoerderTypes,
-            Vervoerders = request.Vervoerders,
-            Wagencodes = request.Wagencodes,
-            MinDwellMin = request.MinDwellMin,
-            RoadThreshold = request.RoadThreshold,
-            RoadTopPercent = request.RoadTopPercent,
-            MarkerTopN = request.MarkerTopN,
-            ZeZoneMode = request.ZeZoneMode,
-        };
-        var normalized = NormalizeFilter(filter);
-        return request with
-        {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
             MinVehicles = Math.Clamp(request.MinVehicles, 1, 1000),
             Scenario = NormalizeScenario(request.Scenario),
         };
@@ -943,19 +903,8 @@ public sealed partial class RouteAnalysisService
 
     private OvernightLocationDetailRequest NormalizeLocationDetailRequest(OvernightLocationDetailRequest request)
     {
-        var normalized = NormalizeFilter(request);
-        return request with
+        return (OvernightLocationDetailRequest)NormalizeFilter(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
             DepotId = request.DepotId.Trim(),
             Scenario = NormalizeScenario(request.Scenario),
         };
@@ -963,19 +912,8 @@ public sealed partial class RouteAnalysisService
 
     private StopLocationDetailRequest NormalizeStopLocationDetailRequest(StopLocationDetailRequest request)
     {
-        var normalized = NormalizeFilter(request);
-        return request with
+        return (StopLocationDetailRequest)NormalizeFilter(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
             Lat = Math.Clamp(request.Lat, -90, 90),
             Lon = Math.Clamp(request.Lon, -180, 180),
             Label = request.Label?.Trim(),
@@ -986,21 +924,9 @@ public sealed partial class RouteAnalysisService
 
     private RoadSelectionRequest NormalizeRoadSelectionRequest(RoadSelectionRequest request)
     {
-        var normalized = NormalizeFilter(request);
-        var road = request.Road;
-        return request with
+        return (RoadSelectionRequest)NormalizeFilter(request) with
         {
-            DateFrom = normalized.DateFrom,
-            DateTo = normalized.DateTo,
-            VervoerderTypes = normalized.VervoerderTypes,
-            Vervoerders = normalized.Vervoerders,
-            Wagencodes = normalized.Wagencodes,
-            MinDwellMin = normalized.MinDwellMin,
-            RoadThreshold = normalized.RoadThreshold,
-            RoadTopPercent = normalized.RoadTopPercent,
-            MarkerTopN = normalized.MarkerTopN,
-            ZeZoneMode = normalized.ZeZoneMode,
-            Road = road with { RadiusKm = Math.Clamp(road.RadiusKm, 0.2, 20) },
+            Road = request.Road with { RadiusKm = Math.Clamp(request.Road.RadiusKm, 0.2, 20) },
             Scenario = NormalizeScenario(request.Scenario),
         };
     }

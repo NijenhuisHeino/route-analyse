@@ -16,6 +16,9 @@ public record AnalysisFilter
 
 public sealed record SimulationRequest : AnalysisFilter
 {
+    public SimulationRequest() { }
+    public SimulationRequest(AnalysisFilter filter) : base(filter) { }
+
     public double KwhPerKm { get; init; } = 1.2;
     public double CapacityKwh { get; init; } = 590;
     public double StartSocPct { get; init; } = 100;
@@ -148,6 +151,9 @@ public sealed record ChargingScenario
 
 public sealed record OvernightLocationsRequest : AnalysisFilter
 {
+    public OvernightLocationsRequest() { }
+    public OvernightLocationsRequest(AnalysisFilter filter) : base(filter) { }
+
     public int MinVehicles { get; init; } = 5;
     public ChargingScenario Scenario { get; init; } = new();
 }
@@ -174,12 +180,18 @@ public sealed record OvernightLocationsResponse(
 
 public sealed record OvernightLocationDetailRequest : AnalysisFilter
 {
+    public OvernightLocationDetailRequest() { }
+    public OvernightLocationDetailRequest(AnalysisFilter filter) : base(filter) { }
+
     public string DepotId { get; init; } = "";
     public ChargingScenario Scenario { get; init; } = new();
 }
 
 public sealed record StopLocationDetailRequest : AnalysisFilter
 {
+    public StopLocationDetailRequest() { }
+    public StopLocationDetailRequest(AnalysisFilter filter) : base(filter) { }
+
     public double Lat { get; init; }
     public double Lon { get; init; }
     public string? Label { get; init; }
@@ -196,12 +208,18 @@ public sealed record RoadSelection(
 
 public sealed record RoadSelectionRequest : AnalysisFilter
 {
+    public RoadSelectionRequest() { }
+    public RoadSelectionRequest(AnalysisFilter filter) : base(filter) { }
+
     public RoadSelection Road { get; init; } = new(0, 0, 0, 0);
     public ChargingScenario Scenario { get; init; } = new();
 }
 
 public record RoadBreakDemandRequest : AnalysisFilter
 {
+    public RoadBreakDemandRequest() { }
+    public RoadBreakDemandRequest(AnalysisFilter filter) : base(filter) { }
+
     public double KwhPerKm { get; init; } = 1.2;
     public double CapacityKwh { get; init; } = 590;
     public double TargetSocPct { get; init; } = 100;
@@ -215,6 +233,9 @@ public record RoadBreakDemandRequest : AnalysisFilter
 
 public sealed record RoadBreakDemandDetailRequest : RoadBreakDemandRequest
 {
+    public RoadBreakDemandDetailRequest() { }
+    public RoadBreakDemandDetailRequest(RoadBreakDemandRequest request) : base(request) { }
+
     public RoadSelection Road { get; init; } = new(0, 0, 0, 0);
 }
 
@@ -375,6 +396,9 @@ public sealed record ChargingProfile(
 
 public record PowerProfileRequest : AnalysisFilter
 {
+    public PowerProfileRequest() { }
+    public PowerProfileRequest(AnalysisFilter filter) : base(filter) { }
+
     public string[] VehicleClasses { get; init; } = [];
     public int TopLocations { get; init; } = 5;
     public int[] ScenarioYears { get; init; } = [];
@@ -385,6 +409,9 @@ public record PowerProfileRequest : AnalysisFilter
 
 public sealed record PowerLocationProfileRequest : PowerProfileRequest
 {
+    public PowerLocationProfileRequest() { }
+    public PowerLocationProfileRequest(PowerProfileRequest request) : base(request) { }
+
     public string LocationId { get; init; } = "";
 }
 

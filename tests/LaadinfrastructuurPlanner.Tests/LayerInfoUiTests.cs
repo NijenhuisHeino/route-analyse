@@ -59,11 +59,13 @@ public sealed class LayerInfoUiTests
             "Components",
             "Pages",
             "Home.razor"));
+        var selectionPanel = ReadPanel("SelectionDetailPanel.razor");
 
         Assert.Contains("HasActiveMapSelection", home);
-        Assert.Contains("Kaartselectie actief", home);
         Assert.Contains("@if (!HasActiveMapSelection)", home);
-        Assert.Contains("Pauzelaadvraag per uur", home);
+        Assert.Contains("SelectionDetailPanel", home);
+        Assert.Contains("Kaartselectie actief", selectionPanel);
+        Assert.Contains("Pauzelaadvraag per uur", selectionPanel);
     }
 
     [Fact]
@@ -76,12 +78,25 @@ public sealed class LayerInfoUiTests
             "Components",
             "Pages",
             "Home.razor"));
+        var roadTablePanel = ReadPanel("RoadTablePanel.razor");
 
-        Assert.Contains("Wegvlakken onder de kaart", home);
-        Assert.Contains("RoadTableFilter", home);
-        Assert.Contains("SetRoadSort", home);
-        Assert.Contains("RoadDisplayName", home);
-        Assert.Contains("Passages</button>", home);
+        Assert.Contains("RoadTablePanel", home);
+        Assert.Contains("Wegvlakken onder de kaart", roadTablePanel);
+        Assert.Contains("RoadTableFilter", roadTablePanel);
+        Assert.Contains("SetRoadSort", roadTablePanel);
+        Assert.Contains("RoadDisplayName", roadTablePanel);
+        Assert.Contains("Passages</button>", roadTablePanel);
+    }
+
+    private static string ReadPanel(string fileName)
+    {
+        return File.ReadAllText(Path.Combine(
+            RepoRoot,
+            "src",
+            "LaadinfrastructuurPlanner",
+            "Components",
+            "Panels",
+            fileName));
     }
 
     private static void AssertLayerInfo(string home, string id, string label, string expectedExplanation)

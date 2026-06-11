@@ -1,0 +1,48 @@
+@namespace LaadinfrastructuurPlanner.Components.Panels
+
+@if (Zones.Length > 0)
+{
+    <section class="table-panel ze-panel">
+        <div class="panel-heading">
+            <h3>Zero-emissiezones</h3>
+            <span>@Zones.Length zones in selectie</span>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Zone</th>
+                        <th>Startdatum</th>
+                        <th>Stops</th>
+                        <th>Ritten</th>
+                        <th>Voertuigen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var zone in Zones.Take(12))
+                    {
+                        <tr>
+                            <td><strong>@zone.Zone</strong></td>
+                            <td>@zone.StartDate</td>
+                            <td>@zone.Stops.ToString("N0")</td>
+                            <td>@zone.Trips.ToString("N0")</td>
+                            <td>@zone.Wagens.ToString("N0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+else if (ShowEmptyState)
+{
+    <section class="empty-state compact-empty">
+        <h3>Geen stops in zero-emissiezone</h3>
+        <p>Er zijn geen ZE-zone stops binnen de huidige filters.</p>
+    </section>
+}
+
+@code {
+    [Parameter] public ZeZoneSummary[] Zones { get; set; } = [];
+    [Parameter] public bool ShowEmptyState { get; set; }
+}

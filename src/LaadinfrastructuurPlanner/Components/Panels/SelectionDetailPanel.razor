@@ -1,0 +1,388 @@
+@namespace LaadinfrastructuurPlanner.Components.Panels
+
+<section id="selection-detail" class="selection-panel map-selection-detail">
+    <div class="panel-heading">
+        <div>
+            <h3>@Detail.Title</h3>
+            <span>Kaartselectie actief · @UiFormat.SelectionTypeLabel(Detail.SelectionType)</span>
+        </div>
+        <button @onclick="() => OnRefresh.InvokeAsync()" disabled="@IsBusy">Scenario bijwerken</button>
+    </div>
+
+    <p class="selection-context-note">
+        Alle grafieken, heatmaps en tabellen hieronder horen alleen bij het object dat je op de kaart hebt aangeklikt.
+    </p>
+
+    @if (!string.IsNullOrWhiteSpace(Detail.Message))
+    {
+        <p class="selection-message">@Detail.Message</p>
+    }
+
+    <div class="metric-row compact">
+        <div class="metric"><span>Dagritten</span><strong>@UiFormat.FormatNumber(Detail.Summary.Trips)</strong></div>
+        <div class="metric"><span>Voertuigen</span><strong>@UiFormat.FormatNumber(Detail.Summary.UniqueVehicles)</strong></div>
+        <div class="metric"><span>Energievraag (MWh)</span><strong>@UiFormat.FormatNumber(Detail.Charging.TotalMwh)</strong></div>
+        <div class="metric"><span>Piekvraag (MW)</span><strong>@Detail.Charging.PeakMw.ToString("N2")</strong></div>
+    </div>
+
+    @if (Detail.SelectionType == "depot")
+    {
+        var selectedDemand = SelectedWeeklyDemandCell();
+        <div class="analysis-card weekly-demand-card">
+            <div class="card-heading">
+                <strong>Piekprofiel vermogensvraag per weekuur</strong>
+                <span>@(selectedDemand is null ? "Geen stilstandvensters" : $"{selectedDemand.Label} · {selectedDemand.Vehicles:N0} voertuigen · {selectedDemand.RequiredKw:N0} kW")</span>
+            </div>
+            <div class="week-demand-heatmap" aria-label="Weekprofiel vermogensvraag">
+                <div class="week-grid-corner"></div>
+                @foreach (var hour in Enumerable.Range(0, 24))
+                {
+                    <span class="week-hour-label">@($"{hour:00}")</span>
+                }
+                @foreach (var dayGroup in Detail.Charging.WeeklyProfile.GroupBy(x => new { x.DayIndex, x.DayLabel }).OrderBy(x => x.Key.DayIndex))
+                {
+                    <strong class="week-day-label">@UiFormat.ShortDayLabel(dayGroup.Key.DayLabel)</strong>
+                    @foreach (var cell in dayGroup.OrderBy(x => x.Hour))
+                    {
+                        <button class="@WeekCellClass(cell)"
+                                style="@WeekCellStyle(cell)"
+                                title="@($"{cell.Label}: {cell.Vehicles:N0} voertuigen, {cell.RequiredKw:N0} kW gevraagd")"
+                                @onclick="() => OpenDemandPopupAsync(cell)">
+                            <span>@cell.RequiredKw.ToString("N0")</span>
+                        </button>
+                    }
+                }
+            </div>
+            <p class="week-demand-note">
+                @(EmptyWeekCellCount() == 0
+                    ? "In de huidige selectie is elk week/uurblok minimaal één keer bezet; er zijn daarom geen 0 kW-blokken voor deze filters."
+                    : "Grijze blokken zijn 0 kW: geen voertuigen aanwezig in dat week/uurblok.")
+            </p>
+            @if (selectedDemand is not null)
+            {
+                <div class="week-demand-detail">
+                    <strong>@selectedDemand.Label</strong>
+                    <span>@selectedDemand.RequiredKw.ToString("N0") kW gevraagd (@selectedDemand.RequiredMw.ToString("N2") MW)</span>
+                    <span>@selectedDemand.Vehicles.ToString("N0") voertuigen aanwezig</span>
+                    <span>Kentekens: @UiFormat.JoinValues(selectedDemand.Kentekens, "geen kentekens bekend")</span>
+                    <span>Voertuigcodes: @UiFormat.JoinValues(selectedDemand.Wagencodes, "geen voertuigcodes bekend")</span>
+                </div>
+            }
+        </div>
+    }
+
+    @{
+        var distanceDistribution = SelectedDistanceDistribution();
+        var distanceTitle = Detail.SelectionType == "road"
+            ? "Dagkilometers van voertuigen over dit wegvlak"
+            : "Afstandsverdeling";
+        var distanceSubtitle = Detail.SelectionType == "road"
+            ? $"{distanceDistribution.Trips:N0} voertuig-dagen · P50 {distanceDistribution.P50Km:N0} km · P75 {distanceDistribution.P75Km:N0} km · P95 {distanceDistribution.P95Km:N0} km"
+            : $"P95 {distanceDistribution.P95Km:N0} km";
+    }
+
+    <div class="selection-grid">
+        <div class="analysis-card">
+            <div class="card-heading">
+                <strong>@distanceTitle</strong>
+                <span>@distanceSubtitle</span>
+            </div>
+            @if (Detail.SelectionType == "road")
+            {
+                <p class="distance-note">Staafhoogte = aantal voertuig-dagen. De rij met 0, 100, 200 enz. is de km/dag-bucket; de vetgedrukte rij eronder is het aantal voertuig-dagen in die bucket.</p>
+                <div class="distance-curve" aria-label="Dagkilometers per voertuig-dag">
+                    @foreach (var bucket in distanceDistribution.Buckets)
+                    {
+                        <div class="@UiFormat.DistanceBucketClass(bucket)"
+                             style="@UiFormat.DistanceBarStyle(bucket.Trips, distanceDistribution.Buckets)"
+                             title="@($"{UiFormat.DistanceBucketLabel(bucket)} km: {bucket.Trips:N0} voertuig-dagen")">
+                            <i></i>
+                            <span>@UiFormat.DistanceBucketShortLabel(bucket)</span>
+                            <b>@bucket.Trips</b>
+                        </div>
+                    }
+                </div>
+                <div class="distance-axis-key" aria-hidden="true">
+                    <span>Km/dag bucket</span>
+                    <strong>Aantal voertuig-dagen</strong>
+                </div>
+                <div class="road-passage-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Kenteken(s)</th>
+                                <th>Voertuigcode</th>
+                                <th>Passages</th>
+                                <th>Gem. km/dag</th>
+                                <th>P95 km</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in RoadPassageRows())
+                            {
+                                <tr>
+                                    <td><strong>@row.Kentekens</strong></td>
+                                    <td>@row.Wagencode</td>
+                                    <td>@row.Passages.ToString("N0")</td>
+                                    <td>@row.AvgDayKm.ToString("N0")</td>
+                                    <td>@row.P95Km.ToString("N0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="histogram">
+                    @foreach (var bucket in distanceDistribution.Buckets)
+                    {
+                        <div class="histogram-row">
+                            <span>@bucket.FromKm.ToString("N0")-@bucket.ToKm.ToString("N0")</span>
+                            <div><i style="width:@UiFormat.HistogramWidth(bucket.Trips, distanceDistribution.Buckets)"></i></div>
+                            <b>@bucket.Trips</b>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="analysis-card">
+            <div class="card-heading">
+                <strong>@(Detail.SelectionType == "road" ? "Pauze-laadvraag" : "Laadprofiel")</strong>
+                <span>@(Detail.SelectionType == "road" && RoadBreakDemand is not null ? $"{RoadBreakDemand.Passages:N0} passages · piek {RoadBreakDemand.PeakMw:N2} MW" : Detail.Charging.Recommendation)</span>
+            </div>
+            @if (Detail.SelectionType == "road" && RoadBreakDemand is not null)
+            {
+                <div class="road-break-hour-card">
+                    <div class="card-heading compact-heading">
+                        <strong>Pauzelaadvraag per uur</strong>
+                        <span>24-uurs heatmap voor alleen dit aangeklikte wegvlak</span>
+                    </div>
+                    <div class="road-break-hour-heatmap" aria-label="Pauzelaadvraag per uur voor geselecteerd wegvlak">
+                        @foreach (var hour in RoadBreakDemand.HourlyProfile.OrderBy(x => x.Hour))
+                        {
+                            <div class="@RoadBreakHourCellClass(hour)"
+                                 style="@RoadBreakHourCellStyle(hour)"
+                                 title="@($"{hour.Label}: {hour.Vehicles:N0} voertuigen · {UiFormat.FormatPower(hour.RequiredKw)} piek · {hour.DemandKwh:N0} kWh")">
+                                <span>@hour.Hour.ToString("00")</span>
+                                <strong>@UiFormat.FormatPower(hour.RequiredKw)</strong>
+                                <em>@hour.Vehicles.ToString("N0")</em>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="window-list">
+                    @foreach (var slot in RoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
+                    {
+                        <div class="window-row">
+                            <strong>@slot.Label</strong>
+                            <span>@slot.DemandKwh.ToString("N0") kWh gevraagd</span>
+                            <span>@slot.Vehicles.ToString("N0") voertuigen</span>
+                            <span>@slot.RequiredMw.ToString("N2") MW</span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="window-list">
+                    @foreach (var window in Detail.Charging.BusyWindows)
+                    {
+                        <div class="window-row">
+                            <strong>@window.TimeSlot</strong>
+                            <span>@window.DemandKwh.ToString("N0") kWh nodig</span>
+                            <span>@window.ShortageKwh.ToString("N0") kWh publieke laadvraag</span>
+                            <span>@window.RequiredMw.ToString("N2") MW</span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (Detail.SelectionType == "road" && RoadBreakDemand is not null)
+    {
+        <div class="table-panel nested-table">
+            <div class="panel-heading">
+                <h3>Voertuigen in pauzevenster</h3>
+                <span>@RoadBreakDemand.Vehicles.ToString("N0") voertuigen · @RoadBreakDemand.Passages.ToString("N0") passages</span>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Kenteken</th>
+                            <th>Voertuigcode</th>
+                            <th>Pauzemoment</th>
+                            <th>Rijtijd</th>
+                            <th>Km sinds shift</th>
+                            <th>kWh</th>
+                            <th>Benodigd kW</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in RoadBreakDemand.VehiclesInWindow)
+                        {
+                            <tr>
+                                <td><strong>@row.Kenteken</strong></td>
+                                <td>@row.Wagencode</td>
+                                <td>@row.BreakStart.ToString("dd-MM HH:mm")</td>
+                                <td>@row.DriveHoursSinceShiftStart.ToString("N2")</td>
+                                <td>@row.KmSinceShiftStart.ToString("N0")</td>
+                                <td>@row.DemandKwh.ToString("N0")</td>
+                                <td>@row.RequiredKw.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <div class="table-panel nested-table">
+        <div class="panel-heading">
+            <h3>Voertuigen in selectie</h3>
+            <span>@Detail.Vehicles.Length voertuigen</span>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Kenteken(s)</th>
+                        <th>Voertuigcode</th>
+                        <th>@(Detail.SelectionType == "road" ? "Passages" : "Dagen")</th>
+                        <th>Km/dag</th>
+                        <th>kWh/dag</th>
+                        <th>Uren op locatie</th>
+                        <th>Benodigd kW</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Detail.Vehicles.Take(20))
+                    {
+                        <tr>
+                            <td><strong>@row.Kentekens</strong></td>
+                            <td>@row.Wagencode</td>
+                            <td>@(Detail.SelectionType == "road" ? row.Passages : row.Days)</td>
+                            <td>@row.AvgDayKm.ToString("N0")</td>
+                            <td>@row.AvgKwhPerDay.ToString("N0")</td>
+                            <td>@row.AvgStandingHours.ToString("N1")</td>
+                            <td>@row.RequiredKw.ToString("N0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public SelectionDetailResponse Detail { get; set; } = default!;
+    [Parameter] public RoadBreakDemandDetailResponse? RoadBreakDemand { get; set; }
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback<VehicleDemandPopup> OnOpenPopup { get; set; }
+
+    private SelectionDetailResponse? _previousDetail;
+    private int? SelectedDemandDay { get; set; }
+    private int? SelectedDemandHour { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_previousDetail, Detail))
+        {
+            _previousDetail = Detail;
+            SelectedDemandDay = null;
+            SelectedDemandHour = null;
+        }
+    }
+
+    private async Task OpenDemandPopupAsync(WeeklyDemandCell cell)
+    {
+        SelectedDemandDay = cell.DayIndex;
+        SelectedDemandHour = cell.Hour;
+        await OnOpenPopup.InvokeAsync(new VehicleDemandPopup(
+            cell.Label,
+            $"{cell.Vehicles:N0} voertuigen · {UiFormat.FormatPower(cell.RequiredKw)} gevraagd",
+            cell.VehicleDemands
+                .Select(vehicle => new VehicleDemandPopupRow(
+                    vehicle.Wagencode,
+                    vehicle.Kenteken,
+                    "",
+                    vehicle.DemandKwh,
+                    vehicle.RequiredKw,
+                    vehicle.StandingHours,
+                    vehicle.Window))
+                .ToArray()));
+    }
+
+    private WeeklyDemandCell? SelectedWeeklyDemandCell()
+    {
+        if (Detail.Charging.WeeklyProfile.Length == 0)
+        {
+            return null;
+        }
+
+        var peak = Detail.Charging.WeeklyProfile
+            .OrderByDescending(x => x.RequiredKw)
+            .ThenByDescending(x => x.Vehicles)
+            .FirstOrDefault(x => x.RequiredKw > 0 || x.Vehicles > 0)
+            ?? Detail.Charging.WeeklyProfile.FirstOrDefault();
+        var day = SelectedDemandDay ?? peak?.DayIndex;
+        var hour = SelectedDemandHour ?? peak?.Hour;
+
+        return day is null || hour is null
+            ? null
+            : Detail.Charging.WeeklyProfile.FirstOrDefault(x => x.DayIndex == day.Value && x.Hour == hour.Value);
+    }
+
+    private string WeekCellClass(WeeklyDemandCell cell)
+    {
+        var classes = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? "week-cell is-empty" : "week-cell";
+        return SelectedDemandDay == cell.DayIndex && SelectedDemandHour == cell.Hour ? $"{classes} active" : classes;
+    }
+
+    private string WeekCellStyle(WeeklyDemandCell cell)
+    {
+        var max = Detail.Charging.WeeklyProfile.Max(x => x.RequiredKw);
+        var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
+        var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.12 + 0.78 * intensity;
+        return $"--hour-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private string RoadBreakHourCellClass(HourlyDemandCell cell)
+    {
+        return cell.RequiredKw > 0 || cell.Vehicles > 0
+            ? "road-break-hour-cell has-demand"
+            : "road-break-hour-cell is-empty";
+    }
+
+    private string RoadBreakHourCellStyle(HourlyDemandCell cell)
+    {
+        var max = RoadBreakDemand?.HourlyProfile.Select(x => x.RequiredKw).DefaultIfEmpty(0).Max() ?? 0;
+        var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
+        var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.16 + 0.74 * intensity;
+        return $"--break-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private int EmptyWeekCellCount()
+    {
+        return Detail.Charging.WeeklyProfile.Count(x => x.RequiredKw <= 0 && x.Vehicles <= 0);
+    }
+
+    private DistanceDistribution SelectedDistanceDistribution()
+    {
+        return Detail.SelectionType == "road"
+            ? Detail.DailyDistanceDistribution
+            : Detail.Distribution;
+    }
+
+    private IEnumerable<SelectionVehicleRow> RoadPassageRows()
+    {
+        return Detail.Vehicles
+            .OrderByDescending(x => x.Passages)
+            .ThenBy(x => x.Kentekens, StringComparer.OrdinalIgnoreCase)
+            .Take(20);
+    }
+}

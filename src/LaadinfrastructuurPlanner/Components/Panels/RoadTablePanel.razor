@@ -1,0 +1,107 @@
+@namespace LaadinfrastructuurPlanner.Components.Panels
+
+<section class="table-panel map-road-table-panel">
+    <div class="panel-heading">
+        <div>
+            <h3>Wegvlakken onder de kaart</h3>
+            <span>@FilteredRows().Count().ToString("N0") van @Segments.Length.ToString("N0") wegvlakken</span>
+        </div>
+    </div>
+    <div class="table-filter-row">
+        <label>
+            Filter wegvlak
+            <input placeholder="zoek op A2, A6, richting of coordinaten" @bind="RoadTableFilter" @bind:event="oninput" />
+        </label>
+        <div class="sort-button-group" aria-label="Sorteer wegvlakken">
+            <button type="button" class="@RoadSortClass("passes")" @onclick='() => SetRoadSort("passes")'>Passages</button>
+            <button type="button" class="@RoadSortClass("vehicles")" @onclick='() => SetRoadSort("vehicles")'>Voertuigen</button>
+            <button type="button" class="@RoadSortClass("name")" @onclick='() => SetRoadSort("name")'>Weg</button>
+            <button type="button" class="@RoadSortClass("length")" @onclick='() => SetRoadSort("length")'>Lengte</button>
+        </div>
+    </div>
+    <div class="table-scroll road-table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>Weg</th>
+                    <th>Rijrichting</th>
+                    <th>Locatie</th>
+                    <th>Lengte</th>
+                    <th>Voertuigen</th>
+                    <th>Passages</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in FilteredRows())
+                {
+                    <tr>
+                        <td><strong>@UiFormat.RoadDisplayName(row)</strong></td>
+                        <td>@row.Direction</td>
+                        <td><span>@UiFormat.RoadCoordinateLabel(row)</span></td>
+                        <td>@row.LengthKm.ToString("N1") km</td>
+                        <td>@row.UniqueWagens.ToString("N0")</td>
+                        <td>@row.Passes.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    [Parameter] public RoadLine[] Segments { get; set; } = [];
+
+    private string RoadTableFilter { get; set; } = "";
+    private string RoadTableSort { get; set; } = "passes";
+    private bool RoadTableDescending { get; set; } = true;
+
+    private void SetRoadSort(string sort)
+    {
+        if (RoadTableSort == sort)
+        {
+            RoadTableDescending = !RoadTableDescending;
+            return;
+        }
+
+        RoadTableSort = sort;
+        RoadTableDescending = sort is not "name";
+    }
+
+    private string RoadSortClass(string sort)
+    {
+        return RoadTableSort == sort
+            ? $"active {(RoadTableDescending ? "desc" : "asc")}"
+            : "";
+    }
+
+    private IEnumerable<RoadLine> FilteredRows()
+    {
+        IEnumerable<RoadLine> rows = Segments;
+        var query = RoadTableFilter.Trim();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            rows = rows.Where(row =>
+                UiFormat.RoadDisplayName(row).Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.Direction.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || UiFormat.RoadCoordinateLabel(row).Contains(query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        rows = RoadTableSort switch
+        {
+            "vehicles" => RoadTableDescending
+                ? rows.OrderByDescending(x => x.UniqueWagens).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(x => x.UniqueWagens).ThenBy(x => x.Passes),
+            "name" => RoadTableDescending
+                ? rows.OrderByDescending(UiFormat.RoadDisplayName, StringComparer.OrdinalIgnoreCase).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(UiFormat.RoadDisplayName, StringComparer.OrdinalIgnoreCase).ThenByDescending(x => x.Passes),
+            "length" => RoadTableDescending
+                ? rows.OrderByDescending(x => x.LengthKm).ThenByDescending(x => x.Passes)
+                : rows.OrderBy(x => x.LengthKm).ThenByDescending(x => x.Passes),
+            _ => RoadTableDescending
+                ? rows.OrderByDescending(x => x.Passes).ThenByDescending(x => x.UniqueWagens)
+                : rows.OrderBy(x => x.Passes).ThenBy(x => x.UniqueWagens)
+        };
+
+        return rows.Take(100);
+    }
+}

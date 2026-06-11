@@ -573,16 +573,8 @@ public sealed partial class RouteAnalysisService
 
     private SimulationRequest NormalizeSimulation(SimulationRequest request)
     {
-        return request with
+        return (SimulationRequest)NormalizeFilter(request) with
         {
-            VervoerderTypes = NormalizeArray(request.VervoerderTypes),
-            Vervoerders = NormalizeArray(request.Vervoerders),
-            Wagencodes = NormalizeArray(request.Wagencodes),
-            MinDwellMin = Math.Max(0, request.MinDwellMin),
-            RoadThreshold = Math.Clamp(request.RoadThreshold, 1, 1_000_000),
-            RoadTopPercent = Math.Clamp(request.RoadTopPercent, 1, 25),
-            MarkerTopN = Math.Clamp(request.MarkerTopN, 50, 5_000),
-            ZeZoneMode = NormalizeZeZoneMode(request.ZeZoneMode),
             KwhPerKm = Math.Clamp(request.KwhPerKm, 0.5, 3.0),
             CapacityKwh = Math.Clamp(request.CapacityKwh, 100, 1_500),
             StartSocPct = Math.Clamp(request.StartSocPct, 50, 100),

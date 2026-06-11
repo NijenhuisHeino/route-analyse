@@ -1,0 +1,57 @@
+@namespace LaadinfrastructuurPlanner.Components.Panels
+
+@if (Popup is not null)
+{
+    <div class="demand-modal-backdrop" role="presentation" @onclick="() => OnClose.InvokeAsync()">
+        <section class="demand-modal" role="dialog" aria-modal="true" aria-labelledby="demand-modal-title" @onclick:stopPropagation>
+            <div class="demand-modal__heading">
+                <div>
+                    <h3 id="demand-modal-title">@Popup.Title</h3>
+                    <span>@Popup.Subtitle</span>
+                </div>
+                <button type="button" class="icon-button" aria-label="Sluiten" title="Sluiten" @onclick="() => OnClose.InvokeAsync()">&times;</button>
+            </div>
+            @if (Popup.Rows.Length == 0)
+            {
+                <p class="demand-modal__empty">Geen voertuigen aanwezig in dit uurblok.</p>
+            }
+            else
+            {
+                <div class="demand-modal__table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Voertuig</th>
+                                <th>Kenteken</th>
+                                <th>Klasse</th>
+                                <th>Venster</th>
+                                <th>Stilstand</th>
+                                <th>kWh</th>
+                                <th>Vermogen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var vehicle in Popup.Rows)
+                            {
+                                <tr>
+                                    <td><strong>@UiFormat.DisplayValue(vehicle.Wagencode)</strong></td>
+                                    <td>@UiFormat.DisplayValue(vehicle.Kenteken)</td>
+                                    <td>@UiFormat.DisplayValue(vehicle.VehicleClass)</td>
+                                    <td>@UiFormat.DisplayValue(vehicle.Window)</td>
+                                    <td>@UiFormat.FormatStandingDuration(vehicle.StandingHours)</td>
+                                    <td>@vehicle.DemandKwh.ToString("N0")</td>
+                                    <td><strong>@UiFormat.FormatPower(vehicle.RequiredKw)</strong></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public VehicleDemandPopup? Popup { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+}
