@@ -1732,3 +1732,10 @@ td span {
   padding: 0 16px 16px;
   margin: 0;
 }
+
+.table-empty-row {
+  padding: 16px;
+  color: var(--eta-muted);
+  font-size: 13px;
+  text-align: center;
+}

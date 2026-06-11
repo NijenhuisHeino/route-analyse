@@ -638,7 +638,7 @@
                 <div class="panel-heading">
                     <div>
                         <h3>Wegvlakken onder de kaart</h3>
-                        <span>@MapRoadRows().Count().ToString("N0") van @(Dashboard?.TopRoadSegments.Length ?? 0).ToString("N0") wegvlakken</span>
+                        <span>@MapRoadRows().Count().ToString("N0") van @((Dashboard?.TopRoadSegments.Length ?? 0).ToString("N0")) wegvlakken</span>
                     </div>
                 </div>
                 <div class="table-filter-row">
@@ -666,7 +666,12 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in MapRoadRows())
+                            @{ var visibleRoadRows = MapRoadRows().ToArray(); }
+                            @if (visibleRoadRows.Length == 0)
+                            {
+                                <tr><td colspan="6" class="table-empty-row">Geen wegvlakken gevonden voor dit filter. Pas de zoekterm aan of wis het filter.</td></tr>
+                            }
+                            @foreach (var row in visibleRoadRows)
                             {
                                 <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusRoadRowAsync(row)">
                                     <td><strong>@RoadDisplayName(row)</strong></td>
@@ -680,6 +685,13 @@
                         </tbody>
                     </table>
                 </div>
+            </section>
+        }
+
+        @if (!HasActiveMapSelection && (SelectedRoad is not null || SelectedDepotId is not null || SelectedStopLocation is not null))
+        {
+            <section class="selection-panel map-selection-detail">
+                <p class="hotspot-empty">Selectiedetails worden geladen…</p>
             </section>
         }
 
@@ -716,8 +728,23 @@
                 @{
                     var weeklyProfile = ActiveWeeklyProfile;
                     var isRoadSelection = SelectedDetail.SelectionType == "road";
+                    var hasWeeklyDemand = weeklyProfile.Any(x => x.RequiredKw > 0 || x.Vehicles > 0);
                 }
-                @if (weeklyProfile.Length > 0 && (SelectedDetail.SelectionType == "depot" || (isRoadSelection && SelectedRoadBreakDemand is not null)))
+                @if ((SelectedDetail.SelectionType == "depot" || (isRoadSelection && SelectedRoadBreakDemand is not null)) && !hasWeeklyDemand)
+                {
+                    <div class="analysis-card weekly-demand-card">
+                        <div class="card-heading">
+                            <strong>@(isRoadSelection ? "Piekprofiel pauzelaadvraag per weekuur" : "Piekprofiel vermogensvraag per weekuur")</strong>
+                            <span>@(isRoadSelection ? "Geen pauzemomenten gevonden" : "Geen stilstandvensters gevonden")</span>
+                        </div>
+                        <p class="week-demand-note">
+                            @(isRoadSelection
+                                ? "Op dit wegvlak vallen geen voertuigen binnen het ingestelde rijtijdvenster. Vergroot het pauzevenster in de zijbalk of verruim de filters om hier vraag te zien."
+                                : "Voor deze locatie zijn geen stilstandvensters gevonden binnen de huidige filters. Verruim de periode of de voertuigfilters om het weekprofiel te vullen.")
+                        </p>
+                    </div>
+                }
+                else if (weeklyProfile.Length > 0 && hasWeeklyDemand && (SelectedDetail.SelectionType == "depot" || (isRoadSelection && SelectedRoadBreakDemand is not null)))
                 {
                     var selectedDemand = SelectedWeeklyDemandCell();
                     <div class="analysis-card weekly-demand-card">
@@ -846,18 +873,25 @@
                         </div>
                         @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
                         {
-                            <p class="distance-note">Drukste kwartieren binnen het pauzevenster voor dit wegvlak. Het volledige week/uurprofiel staat in de heatmap hierboven.</p>
-                            <div class="window-list">
-                                @foreach (var slot in SelectedRoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
-                                {
-                                    <div class="window-row">
-                                        <strong>@slot.Label</strong>
-                                        <span>@slot.DemandKwh.ToString("N0") kWh gevraagd</span>
-                                        <span>@slot.Vehicles.ToString("N0") voertuigen</span>
-                                        <span>@slot.RequiredMw.ToString("N2") MW</span>
-                                    </div>
-                                }
-                            </div>
+                            @if (SelectedRoadBreakDemand.QuarterProfile.Length == 0)
+                            {
+                                <p class="distance-note">Geen pauzemomenten op dit wegvlak binnen het ingestelde rijtijdvenster. Vergroot het pauzevenster of verruim de filters in de zijbalk.</p>
+                            }
+                            else
+                            {
+                                <p class="distance-note">Drukste kwartieren binnen het pauzevenster voor dit wegvlak. Het volledige week/uurprofiel staat in de heatmap hierboven.</p>
+                                <div class="window-list">
+                                    @foreach (var slot in SelectedRoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
+                                    {
+                                        <div class="window-row">
+                                            <strong>@slot.Label</strong>
+                                            <span>@slot.DemandKwh.ToString("N0") kWh gevraagd</span>
+                                            <span>@slot.Vehicles.ToString("N0") voertuigen</span>
+                                            <span>@slot.RequiredMw.ToString("N2") MW</span>
+                                        </div>
+                                    }
+                                </div>
+                            }
                         }
                         else
                         {
@@ -876,7 +910,7 @@
                     </div>
                 </div>
 
-                @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
+                @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null && SelectedRoadBreakDemand.VehiclesInWindow.Length > 0)
                 {
                     <div class="table-panel nested-table">
                         <div class="panel-heading">
@@ -920,35 +954,42 @@
                         <h3>Voertuigen in selectie</h3>
                         <span>@SelectedDetail.Vehicles.Length voertuigen</span>
                     </div>
-                    <div class="table-scroll">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Kenteken(s)</th>
-                                    <th>Voertuigcode</th>
-                                    <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
-                                    <th>Km/dag</th>
-                                    <th>kWh/dag</th>
-                                    <th>Uren op locatie</th>
-                                    <th>Benodigd kW</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var row in SelectedDetail.Vehicles.Take(20))
-                                {
+                    @if (SelectedDetail.Vehicles.Length == 0)
+                    {
+                        <p class="hotspot-empty">Geen voertuigen gevonden voor deze selectie binnen de huidige filters.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <td><strong>@row.Kentekens</strong></td>
-                                        <td>@row.Wagencode</td>
-                                        <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
-                                        <td>@row.AvgDayKm.ToString("N0")</td>
-                                        <td>@row.AvgKwhPerDay.ToString("N0")</td>
-                                        <td>@row.AvgStandingHours.ToString("N1")</td>
-                                        <td>@row.RequiredKw.ToString("N0")</td>
+                                        <th>Kenteken(s)</th>
+                                        <th>Voertuigcode</th>
+                                        <th>@(SelectedDetail.SelectionType == "road" ? "Passages" : "Dagen")</th>
+                                        <th>Km/dag</th>
+                                        <th>kWh/dag</th>
+                                        <th>Uren op locatie</th>
+                                        <th>Benodigd kW</th>
                                     </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in SelectedDetail.Vehicles.Take(20))
+                                    {
+                                        <tr>
+                                            <td><strong>@row.Kentekens</strong></td>
+                                            <td>@row.Wagencode</td>
+                                            <td>@(SelectedDetail.SelectionType == "road" ? row.Passages : row.Days)</td>
+                                            <td>@row.AvgDayKm.ToString("N0")</td>
+                                            <td>@row.AvgKwhPerDay.ToString("N0")</td>
+                                            <td>@row.AvgStandingHours.ToString("N1")</td>
+                                            <td>@row.RequiredKw.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
                 </div>
             </section>
         }
@@ -983,33 +1024,40 @@
                         <h3>Voertuigen op deze standplaats</h3>
                         <span>@SelectedStandplaats.Depot.VehicleList.Length.ToString("N0") voertuigen</span>
                     </div>
-                    <div class="table-scroll">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Kenteken/vloot</th>
-                                    <th>Merk</th>
-                                    <th>Soort voertuig</th>
-                                    <th>Brandstof</th>
-                                    <th>Ritten in data</th>
-                                    <th>Km in data</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var vehicle in SelectedStandplaats.Depot.VehicleList.OrderByDescending(x => x.TripsInData).ThenBy(x => x.Kenteken).Take(80))
-                                {
+                    @if (SelectedStandplaats.Depot.VehicleList.Length == 0)
+                    {
+                        <p class="hotspot-empty">Geen voertuigen gevonden in de standplaatsen-Excel voor deze locatie.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <td><strong>@(string.IsNullOrWhiteSpace(vehicle.Kenteken) ? vehicle.Vlootnummer : vehicle.Kenteken)</strong></td>
-                                        <td>@vehicle.Merk</td>
-                                        <td>@vehicle.SoortVoertuig</td>
-                                        <td>@vehicle.SoortBrandstof</td>
-                                        <td>@vehicle.TripsInData.ToString("N0")</td>
-                                        <td>@vehicle.KmInData.ToString("N0")</td>
+                                        <th>Kenteken/vloot</th>
+                                        <th>Merk</th>
+                                        <th>Soort voertuig</th>
+                                        <th>Brandstof</th>
+                                        <th>Ritten in data</th>
+                                        <th>Km in data</th>
                                     </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    @foreach (var vehicle in SelectedStandplaats.Depot.VehicleList.OrderByDescending(x => x.TripsInData).ThenBy(x => x.Kenteken).Take(80))
+                                    {
+                                        <tr>
+                                            <td><strong>@(string.IsNullOrWhiteSpace(vehicle.Kenteken) ? vehicle.Vlootnummer : vehicle.Kenteken)</strong></td>
+                                            <td>@vehicle.Merk</td>
+                                            <td>@vehicle.SoortVoertuig</td>
+                                            <td>@vehicle.SoortBrandstof</td>
+                                            <td>@vehicle.TripsInData.ToString("N0")</td>
+                                            <td>@vehicle.KmInData.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
                     @if (SelectedStandplaats.Depot.VehicleList.Length > 80)
                     {
                         <p class="selection-message">+@((SelectedStandplaats.Depot.VehicleList.Length - 80).ToString("N0")) voertuigen niet getoond.</p>
@@ -1059,7 +1107,7 @@
                                     @foreach (var segment in MapOverview.TopBreakSegments)
                                     {
                                         <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusBreakSegmentAsync(segment)">
-                                            <td><span>@segment.Lat1.ToString("0.000"), @segment.Lon1.ToString("0.000")</span></td>
+                                            <td><span>@FormatCoordinates(segment.Lat1, segment.Lon1)</span></td>
                                             <td>@segment.Direction</td>
                                             <td>@segment.Vehicles.ToString("N0")</td>
                                             <td><strong>@segment.Passages.ToString("N0")</strong></td>
@@ -1199,7 +1247,7 @@
                                     <tr class="clickable-row" title="Klik om deze stoplocatie op de kaart te selecteren" @onclick="() => FocusStopAsync(row)">
                                         <td>
                                             <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
-                                            <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
+                                            <span>@FormatCoordinates(row.Lat, row.Lon)</span>
                                         </td>
                                         <td>@row.Wagens</td>
                                         <td>@row.Stops</td>
@@ -1231,7 +1279,7 @@
                                 @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
                                 {
                                     <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusRoadRowAsync(row)">
-                                        <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
+                                        <td><span>@FormatCoordinates(row.Lat1, row.Lon1)</span></td>
                                         <td>@row.Direction</td>
                                         <td>@row.LengthKm.ToString("N1") km</td>
                                         <td>@row.UniqueWagens</td>
@@ -1758,6 +1806,7 @@
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        StateHasChanged();
         await ClearRoadSelectionAsync();
         await RefreshSelectedDetailAsync();
         StateHasChanged();
@@ -1781,6 +1830,7 @@
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        StateHasChanged();
         await ClearRoadSelectionAsync();
         await RefreshSelectedDetailAsync();
         StateHasChanged();
@@ -1798,6 +1848,7 @@
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
+        StateHasChanged();
         await RefreshSelectedDetailAsync();
         StateHasChanged();
     }
@@ -2309,16 +2360,21 @@
         return rows.Take(100);
     }
 
+    private static string FormatCoordinates(double lat, double lon)
+    {
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{lat:0.000}, {lon:0.000}");
+    }
+
     private static string RoadDisplayName(RoadLine row)
     {
         return string.IsNullOrWhiteSpace(row.RoadName)
-            ? $"Wegvlak bij {((row.Lat1 + row.Lat2) / 2):0.000}, {((row.Lon1 + row.Lon2) / 2):0.000}"
+            ? $"Wegvlak bij {FormatCoordinates((row.Lat1 + row.Lat2) / 2, (row.Lon1 + row.Lon2) / 2)}"
             : row.RoadName;
     }
 
     private static string RoadCoordinateLabel(RoadLine row)
     {
-        return $"{((row.Lat1 + row.Lat2) / 2):0.000}, {((row.Lon1 + row.Lon2) / 2):0.000}";
+        return FormatCoordinates((row.Lat1 + row.Lat2) / 2, (row.Lon1 + row.Lon2) / 2);
     }
 
     private int EmptyWeekCellCount()

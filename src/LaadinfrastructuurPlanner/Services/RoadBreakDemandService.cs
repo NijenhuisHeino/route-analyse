@@ -79,7 +79,7 @@ public sealed partial class RouteAnalysisService
             return new RoadBreakDemandDetailResponse(
                 "ok",
                 null,
-                $"Pauzelaadvraag wegvlak · {centerLat:0.000}, {centerLon:0.000}",
+                string.Create(CultureInfo.InvariantCulture, $"Pauzelaadvraag wegvlak · {centerLat:0.000}, {centerLon:0.000}"),
                 Math.Round(peakMw, 3),
                 Math.Round(totalKwh, 1),
                 vehicles,

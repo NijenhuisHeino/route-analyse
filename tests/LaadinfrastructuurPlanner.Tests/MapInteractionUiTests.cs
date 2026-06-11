@@ -36,6 +36,23 @@ public sealed class MapInteractionUiTests
     }
 
     [Fact]
+    public void HomePageRendersFriendlyEmptyAndLoadingStates()
+    {
+        var home = ReadHome();
+
+        Assert.Contains("Geen wegvlakken gevonden voor dit filter", home);
+        Assert.Contains("Selectiedetails worden geladen", home);
+        Assert.Contains("Geen pauzemomenten gevonden", home);
+        Assert.Contains("Geen stilstandvensters gevonden", home);
+        Assert.Contains("Geen voertuigen gevonden voor deze selectie", home);
+
+        // Regressie op gelekte Razor-expressies zoals "100 van 100.ToString(\"N0\") wegvlakken":
+        // een expliciete expressie moet de hele methodeketen omsluiten.
+        Assert.Contains(@"@((Dashboard?.TopRoadSegments.Length ?? 0).ToString(""N0""))", home);
+        Assert.DoesNotContain(@"?? 0).ToString(""N0"") wegvlakken", home);
+    }
+
+    [Fact]
     public void HomePageRendersBreakDemandLegendWithAbsoluteCounts()
     {
         var home = ReadHome();

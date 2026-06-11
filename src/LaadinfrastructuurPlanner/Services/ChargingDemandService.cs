@@ -273,7 +273,7 @@ public sealed partial class RouteAnalysisService
                 cancellationToken);
 
             var title = string.IsNullOrWhiteSpace(normalized.Label)
-                ? $"Vertrekritten vanaf {normalized.Lat:0.000}, {normalized.Lon:0.000}"
+                ? string.Create(CultureInfo.InvariantCulture, $"Vertrekritten vanaf {normalized.Lat:0.000}, {normalized.Lon:0.000}")
                 : $"Vertrekritten vanaf {normalized.Label}";
             return BuildSelectionDetail(
                 "stop",
@@ -381,7 +381,7 @@ public sealed partial class RouteAnalysisService
             return BuildSelectionDetail(
                 "road",
                 null,
-                $"Wegvlak {direction} · {centerLat:0.000}, {centerLon:0.000}",
+                string.Create(CultureInfo.InvariantCulture, $"Wegvlak {direction} · {centerLat:0.000}, {centerLon:0.000}"),
                 centerLat,
                 centerLon,
                 rows,
