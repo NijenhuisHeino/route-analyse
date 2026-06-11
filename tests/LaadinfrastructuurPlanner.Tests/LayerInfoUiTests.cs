@@ -61,7 +61,7 @@ public sealed class LayerInfoUiTests
         Assert.Contains("HasActiveMapSelection", home);
         Assert.Contains("Kaartselectie actief", home);
         Assert.Contains("@if (!HasActiveMapSelection)", home);
-        Assert.Contains("Pauzelaadvraag per uur", home);
+        Assert.Contains("Piekprofiel pauzelaadvraag per weekuur", home);
     }
 
     [Fact]

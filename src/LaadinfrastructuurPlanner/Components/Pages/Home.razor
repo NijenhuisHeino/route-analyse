@@ -713,21 +713,25 @@
                     <div class="metric"><span>Piekvraag (MW)</span><strong>@SelectedDetail.Charging.PeakMw.ToString("N2")</strong></div>
                 </div>
 
-                @if (SelectedDetail.SelectionType == "depot")
+                @{
+                    var weeklyProfile = ActiveWeeklyProfile;
+                    var isRoadSelection = SelectedDetail.SelectionType == "road";
+                }
+                @if (weeklyProfile.Length > 0 && (SelectedDetail.SelectionType == "depot" || (isRoadSelection && SelectedRoadBreakDemand is not null)))
                 {
                     var selectedDemand = SelectedWeeklyDemandCell();
                     <div class="analysis-card weekly-demand-card">
                         <div class="card-heading">
-                            <strong>Piekprofiel vermogensvraag per weekuur</strong>
-                            <span>@(selectedDemand is null ? "Geen stilstandvensters" : $"{selectedDemand.Label} · {selectedDemand.Vehicles:N0} voertuigen · {selectedDemand.RequiredKw:N0} kW")</span>
+                            <strong>@(isRoadSelection ? "Piekprofiel pauzelaadvraag per weekuur" : "Piekprofiel vermogensvraag per weekuur")</strong>
+                            <span>@(selectedDemand is null ? (isRoadSelection ? "Geen pauzemomenten" : "Geen stilstandvensters") : $"{selectedDemand.Label} · {selectedDemand.Vehicles:N0} voertuigen · {selectedDemand.RequiredKw:N0} kW")</span>
                         </div>
-                        <div class="week-demand-heatmap" aria-label="Weekprofiel vermogensvraag">
+                        <div class="week-demand-heatmap" aria-label="@(isRoadSelection ? "Weekprofiel pauzelaadvraag" : "Weekprofiel vermogensvraag")">
                             <div class="week-grid-corner"></div>
                             @foreach (var hour in Enumerable.Range(0, 24))
                             {
                                 <span class="week-hour-label">@($"{hour:00}")</span>
                             }
-                            @foreach (var dayGroup in SelectedDetail.Charging.WeeklyProfile.GroupBy(x => new { x.DayIndex, x.DayLabel }).OrderBy(x => x.Key.DayIndex))
+                            @foreach (var dayGroup in weeklyProfile.GroupBy(x => new { x.DayIndex, x.DayLabel }).OrderBy(x => x.Key.DayIndex))
                             {
                                 <strong class="week-day-label">@ShortDayLabel(dayGroup.Key.DayLabel)</strong>
                                 @foreach (var cell in dayGroup.OrderBy(x => x.Hour))
@@ -842,24 +846,7 @@
                         </div>
                         @if (SelectedDetail.SelectionType == "road" && SelectedRoadBreakDemand is not null)
                         {
-                            <div class="road-break-hour-card">
-                                <div class="card-heading compact-heading">
-                                    <strong>Pauzelaadvraag per uur</strong>
-                                    <span>24-uurs heatmap voor alleen dit aangeklikte wegvlak</span>
-                                </div>
-                                <div class="road-break-hour-heatmap" aria-label="Pauzelaadvraag per uur voor geselecteerd wegvlak">
-                                    @foreach (var hour in SelectedRoadBreakDemand.HourlyProfile.OrderBy(x => x.Hour))
-                                    {
-                                        <div class="@RoadBreakHourCellClass(hour)"
-                                             style="@RoadBreakHourCellStyle(hour)"
-                                             title="@($"{hour.Label}: {hour.Vehicles:N0} voertuigen · {FormatPower(hour.RequiredKw)} piek · {hour.DemandKwh:N0} kWh")">
-                                            <span>@hour.Hour.ToString("00")</span>
-                                            <strong>@FormatPower(hour.RequiredKw)</strong>
-                                            <em>@hour.Vehicles.ToString("N0")</em>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
+                            <p class="distance-note">Drukste kwartieren binnen het pauzevenster voor dit wegvlak. Het volledige week/uurprofiel staat in de heatmap hierboven.</p>
                             <div class="window-list">
                                 @foreach (var slot in SelectedRoadBreakDemand.QuarterProfile.OrderByDescending(x => x.RequiredKw).Take(8))
                                 {
@@ -2033,6 +2020,12 @@
                     Scenario = BuildScenario()
                 });
                 SelectedRoadBreakDemand = await Analysis.GetRoadBreakDemandDetailAsync(BuildRoadBreakDemandDetailRequest(filter, SelectedRoad));
+                var peakBreakDemand = SelectedRoadBreakDemand.WeeklyProfile
+                    .OrderByDescending(x => x.RequiredKw)
+                    .ThenByDescending(x => x.Vehicles)
+                    .FirstOrDefault(x => x.RequiredKw > 0 || x.Vehicles > 0);
+                SelectedDemandDay ??= peakBreakDemand?.DayIndex;
+                SelectedDemandHour ??= peakBreakDemand?.Hour;
             }
 
             if (MapReady && SelectedDetail is not null && SelectedDetail.SelectionType == "stop")
@@ -2168,24 +2161,30 @@
         DemandPopup = null;
     }
 
+    private WeeklyDemandCell[] ActiveWeeklyProfile =>
+        SelectedDetail?.SelectionType == "road"
+            ? SelectedRoadBreakDemand?.WeeklyProfile ?? []
+            : SelectedDetail?.Charging.WeeklyProfile ?? [];
+
     private WeeklyDemandCell? SelectedWeeklyDemandCell()
     {
-        if (SelectedDetail is null || SelectedDetail.Charging.WeeklyProfile.Length == 0)
+        var profile = ActiveWeeklyProfile;
+        if (profile.Length == 0)
         {
             return null;
         }
 
-        var peak = SelectedDetail.Charging.WeeklyProfile
+        var peak = profile
             .OrderByDescending(x => x.RequiredKw)
             .ThenByDescending(x => x.Vehicles)
             .FirstOrDefault(x => x.RequiredKw > 0 || x.Vehicles > 0)
-            ?? SelectedDetail.Charging.WeeklyProfile.FirstOrDefault();
+            ?? profile.FirstOrDefault();
         var day = SelectedDemandDay ?? peak?.DayIndex;
         var hour = SelectedDemandHour ?? peak?.Hour;
 
         return day is null || hour is null
             ? null
-            : SelectedDetail.Charging.WeeklyProfile.FirstOrDefault(x => x.DayIndex == day.Value && x.Hour == hour.Value);
+            : profile.FirstOrDefault(x => x.DayIndex == day.Value && x.Hour == hour.Value);
     }
 
     private string WeekCellClass(WeeklyDemandCell cell)
@@ -2196,25 +2195,10 @@
 
     private string WeekCellStyle(WeeklyDemandCell cell)
     {
-        var max = SelectedDetail?.Charging.WeeklyProfile.Max(x => x.RequiredKw) ?? 0;
+        var max = ActiveWeeklyProfile.Select(x => x.RequiredKw).DefaultIfEmpty(0).Max();
         var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
         var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.12 + 0.78 * intensity;
         return $"--hour-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
-    }
-
-    private string RoadBreakHourCellClass(HourlyDemandCell cell)
-    {
-        return cell.RequiredKw > 0 || cell.Vehicles > 0
-            ? "road-break-hour-cell has-demand"
-            : "road-break-hour-cell is-empty";
-    }
-
-    private string RoadBreakHourCellStyle(HourlyDemandCell cell)
-    {
-        var max = SelectedRoadBreakDemand?.HourlyProfile.Select(x => x.RequiredKw).DefaultIfEmpty(0).Max() ?? 0;
-        var intensity = max <= 0 ? 0 : Math.Clamp(cell.RequiredKw / max, 0, 1);
-        var alpha = cell.RequiredKw <= 0 && cell.Vehicles <= 0 ? 0 : 0.16 + 0.74 * intensity;
-        return $"--break-alpha:{alpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
     }
 
     private static string PowerCellStyle(double requiredKw, IReadOnlyCollection<PowerLocationProfile> profiles)
@@ -2339,7 +2323,7 @@
 
     private int EmptyWeekCellCount()
     {
-        return SelectedDetail?.Charging.WeeklyProfile.Count(x => x.RequiredKw <= 0 && x.Vehicles <= 0) ?? 0;
+        return ActiveWeeklyProfile.Count(x => x.RequiredKw <= 0 && x.Vehicles <= 0);
     }
 
     private static string RoadStatusLabel(string? status)

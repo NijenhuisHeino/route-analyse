@@ -86,6 +86,7 @@ public sealed partial class RouteAnalysisService
                 selected.LongLength,
                 profile,
                 BuildRoadBreakHourlyProfile(selected, normalized.BreakDurationHours),
+                BuildRoadBreakWeeklyProfile(selected, normalized.BreakDurationHours),
                 selected.Select(ToRoadBreakVehicleRow).ToArray(),
                 diagnostics);
         });
@@ -470,6 +471,93 @@ public sealed partial class RouteAnalysisService
             .ToArray();
     }
 
+    private static WeeklyDemandCell[] BuildRoadBreakWeeklyProfile(
+        IReadOnlyList<RoadBreakEvent> events,
+        double breakDurationHours)
+    {
+        // Zelfde piekprofiel-semantiek als het depot-weekprofiel: per weekuur-cel
+        // de drukste werkelijke uur-occurrence over de hele periode. Binnen een
+        // uur telt de piek over de kwartierslots, omdat een pauze korter is dan
+        // een uur en optellen per uur dezelfde pauze meermaals zou meetellen.
+        var peakPerWeekHour = ExpandRoadBreakQuarterLoads(events, breakDurationHours)
+            .GroupBy(x => new DateTime(x.SlotStart.Year, x.SlotStart.Month, x.SlotStart.Day, x.SlotStart.Hour, 0, 0))
+            .Select(hourGroup =>
+            {
+                var hourLoads = hourGroup.ToArray();
+                var peakKw = hourLoads
+                    .GroupBy(x => x.SlotStart)
+                    .Select(slot => slot.Sum(y => y.Event.RequiredKw))
+                    .Max();
+                var vehicleDemands = hourLoads
+                    .GroupBy(x => VehicleDemandKey(x.Event.Wagencode, x.Event.Kenteken), StringComparer.OrdinalIgnoreCase)
+                    .Select(group =>
+                    {
+                        var top = group.OrderByDescending(x => x.Event.RequiredKw).First().Event;
+                        var windowEnd = top.BreakStart.AddHours(Math.Max(0.25, breakDurationHours));
+                        return new WeeklyDemandVehicle(
+                            top.Wagencode,
+                            top.Kenteken,
+                            Math.Round(group.Sum(x => x.Event.RequiredKw * x.OverlapHours), 1),
+                            Math.Round(top.RequiredKw, 1),
+                            Math.Round(group.Sum(x => x.OverlapHours), 2),
+                            $"{top.BreakStart:HH:mm}-{windowEnd:HH:mm}");
+                    })
+                    .OrderByDescending(x => x.RequiredKw)
+                    .ThenBy(x => x.Wagencode, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    hourGroup.Key,
+                    PeakKw = peakKw,
+                    Vehicles = vehicleDemands.LongLength,
+                    Events = hourLoads.Select(x => new { x.Event.Wagencode, x.Event.Kenteken, x.Event.BreakStart }).Distinct().LongCount(),
+                    DemandKwh = hourLoads.Sum(x => x.Event.RequiredKw * x.OverlapHours),
+                    Kentekens = hourLoads
+                        .Select(x => x.Event.Kenteken)
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Order(StringComparer.OrdinalIgnoreCase)
+                        .Take(40)
+                        .ToArray(),
+                    Wagencodes = hourLoads
+                        .Select(x => x.Event.Wagencode)
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Order(StringComparer.OrdinalIgnoreCase)
+                        .Take(40)
+                        .ToArray(),
+                    VehicleDemands = vehicleDemands
+                };
+            })
+            .GroupBy(x => (Day: WeekDayIndex(x.Key.DayOfWeek), x.Key.Hour))
+            .Select(group => group
+                .OrderByDescending(x => x.PeakKw)
+                .ThenByDescending(x => x.Vehicles)
+                .First())
+            .ToDictionary(x => (WeekDayIndex(x.Key.DayOfWeek), x.Key.Hour));
+
+        return Enumerable.Range(0, 7)
+            .SelectMany(day => Enumerable.Range(0, 24).Select(hour =>
+            {
+                peakPerWeekHour.TryGetValue((day, hour), out var peak);
+                return new WeeklyDemandCell(
+                    day,
+                    WeekDayLabel(day),
+                    hour,
+                    $"{WeekDayLabel(day)} {hour:00}:00",
+                    peak?.Vehicles ?? 0,
+                    peak?.Events ?? 0,
+                    Math.Round(peak?.DemandKwh ?? 0, 0),
+                    Math.Round(peak?.PeakKw ?? 0, 0),
+                    Math.Round((peak?.PeakKw ?? 0) / 1000.0, 2),
+                    peak?.Kentekens ?? [],
+                    peak?.Wagencodes ?? [],
+                    peak?.VehicleDemands ?? []);
+            }))
+            .ToArray();
+    }
+
     private static RoadBreakVehicleRow ToRoadBreakVehicleRow(RoadBreakEvent row)
     {
         return new RoadBreakVehicleRow(
@@ -579,6 +667,7 @@ public sealed partial class RouteAnalysisService
             0,
             0,
             0,
+            [],
             [],
             [],
             [],

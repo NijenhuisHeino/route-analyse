@@ -126,6 +126,8 @@ public sealed class PlannerApiEndpointTests : IDisposable
         });
         Assert.Equal("ok", breakDemandDetail.Status);
         Assert.NotEmpty(breakDemandDetail.VehiclesInWindow);
+        Assert.Equal(7 * 24, breakDemandDetail.WeeklyProfile.Length);
+        Assert.Contains(breakDemandDetail.WeeklyProfile, cell => cell.RequiredKw > 0);
 
         var charterStandplaatsen = await client.GetFromJsonAsync<FleetDepotsResponse>("/api/fleet/charter-standplaatsen");
         Assert.NotNull(charterStandplaatsen);

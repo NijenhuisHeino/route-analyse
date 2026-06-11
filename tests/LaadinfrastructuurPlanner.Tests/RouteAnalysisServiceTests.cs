@@ -452,6 +452,34 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandDetailReturnsWeeklyPeakHeatmapForSelectedRoad()
+    {
+        var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
+        {
+            Road = new RoadSelection(53.0, 6.0, 51.9, 4.5, 100),
+            KwhPerKm = 1.0,
+            BreakDurationHours = 0.75
+        });
+
+        Assert.Equal("ok", detail.Status);
+        Assert.Equal(7 * 24, detail.WeeklyProfile.Length);
+        Assert.All(
+            detail.WeeklyProfile.GroupBy(x => x.DayIndex),
+            day => Assert.Equal(Enumerable.Range(0, 24), day.Select(x => x.Hour)));
+        Assert.Contains(detail.WeeklyProfile, cell => cell.RequiredKw > 0 && cell.Vehicles > 0);
+
+        var weeklyPeakKw = detail.WeeklyProfile.Max(x => x.RequiredKw);
+        var quarterPeakKw = detail.QuarterProfile.Max(x => x.RequiredKw);
+        Assert.True(
+            Math.Abs(weeklyPeakKw - quarterPeakKw) <= 1,
+            $"weekly peak {weeklyPeakKw} must match quarter peak {quarterPeakKw}");
+
+        Assert.All(
+            detail.WeeklyProfile.Where(x => x.RequiredKw > 0),
+            cell => Assert.NotEmpty(cell.VehicleDemands));
+    }
+
+    [Fact]
     public async Task RoadBreakDemandResetsOnlyAfterLongGapAtResetLocation()
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest
