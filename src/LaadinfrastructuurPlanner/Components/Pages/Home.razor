@@ -1047,7 +1047,11 @@
                     {
                         <p class="hotspot-empty">Zet de kaartlaag Pauzelaadvraag aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableBreakDemandLayerAsync">Laag inschakelen</button></p>
                     }
-                    else if (MapOverview is null || MapOverview.TopBreakSegments.Length == 0)
+                    else if (MapOverview is null)
+                    {
+                        <p class="hotspot-empty">Kaartdata wordt geladen…</p>
+                    }
+                    else if (MapOverview.TopBreakSegments.Length == 0)
                     {
                         <p class="hotspot-empty">Geen pauzevraag-wegvlakken in de huidige filters.</p>
                     }
@@ -1092,7 +1096,11 @@
                     {
                         <p class="hotspot-empty">Zet de kaartlaag Vaste stilstandlocaties aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableOvernightLayerAsync">Laag inschakelen</button></p>
                     }
-                    else if (MapOverview is null || MapOverview.TopDepots.Length == 0)
+                    else if (MapOverview is null)
+                    {
+                        <p class="hotspot-empty">Kaartdata wordt geladen…</p>
+                    }
+                    else if (MapOverview.TopDepots.Length == 0)
                     {
                         <p class="hotspot-empty">Geen stilstandlocaties in de huidige filters.</p>
                     }
@@ -1135,7 +1143,11 @@
                     {
                         <p class="hotspot-empty">Zet de kaartlaag Standplaatsen of Charterstandplaatsen aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableStandplaatsLayersAsync">Lagen inschakelen</button></p>
                     }
-                    else if (MapOverview is null || MapOverview.TopStandplaatsen.Length == 0)
+                    else if (MapOverview is null)
+                    {
+                        <p class="hotspot-empty">Kaartdata wordt geladen…</p>
+                    }
+                    else if (MapOverview.TopStandplaatsen.Length == 0)
                     {
                         <p class="hotspot-empty">Geen standplaatsen beschikbaar.</p>
                     }
