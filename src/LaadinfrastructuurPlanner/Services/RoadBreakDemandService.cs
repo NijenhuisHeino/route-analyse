@@ -348,10 +348,13 @@ public sealed partial class RouteAnalysisService
         var values = lines.Select(x => x.Passages).OrderBy(x => x).ToArray();
         var distinct = values.Distinct().ToArray();
 
+        // Kwantielen over distinct waarden: passages zijn sterk scheef verdeeld
+        // (heel veel lage duplicaten), waardoor kwantielen over alle waarden de
+        // kleurschaal in de onderste paar waarden zouden samenpersen.
         var stops = new List<RoadBreakDemandGradientStop>();
         for (var i = 0; i < RoadBreakGradientQuantiles.Length; i++)
         {
-            var value = values[(int)Math.Round(RoadBreakGradientQuantiles[i] * (values.Length - 1))];
+            var value = distinct[(int)Math.Round(RoadBreakGradientQuantiles[i] * (distinct.Length - 1))];
             if (stops.Count == 0 || value > stops[^1].Passages)
             {
                 stops.Add(new RoadBreakDemandGradientStop(value, RoadBreakGradientColors[i]));

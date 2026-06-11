@@ -664,14 +664,17 @@ window.routePlannerMap = (() => {
     );
     if (stops.length >= 2) {
       const color = ["interpolate", ["linear"], ["get", "passages"]];
-      stops.forEach((stop) => color.push(stop.passages, stop.color));
-      const vMin = stops[0].passages;
-      const vMax = stops[stops.length - 1].passages;
+      const width = ["interpolate", ["linear"], ["get", "passages"]];
+      const casing = ["interpolate", ["linear"], ["get", "passages"]];
+      stops.forEach((stop, index) => {
+        const lineWidth = 3 + (14 - 3) * index / (stops.length - 1);
+        color.push(stop.passages, stop.color);
+        width.push(stop.passages, lineWidth);
+        casing.push(stop.passages, lineWidth + 4);
+      });
       map.setPaintProperty("road-break-demand", "line-color", color);
-      map.setPaintProperty("road-break-demand", "line-width",
-        ["interpolate", ["linear"], ["get", "passages"], vMin, 3, vMax, 14]);
-      map.setPaintProperty("road-break-demand-casing", "line-width",
-        ["interpolate", ["linear"], ["get", "passages"], vMin, 7, vMax, 18]);
+      map.setPaintProperty("road-break-demand", "line-width", width);
+      map.setPaintProperty("road-break-demand-casing", "line-width", casing);
     } else if (stops.length === 1) {
       map.setPaintProperty("road-break-demand", "line-color", stops[0].color || "#fb923c");
       map.setPaintProperty("road-break-demand", "line-width", 5);
