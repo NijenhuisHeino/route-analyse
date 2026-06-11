@@ -17,6 +17,8 @@ public sealed class LayerInfoUiTests
 
         Assert.Contains("OpenLayerInfoId", home);
         Assert.Contains("LayerInfoExpanded", home);
+        Assert.Contains("ToggleLayerInfo(layer.Id)", home);
+        Assert.Contains("layer-info-{layer.Id}", home);
         Assert.DoesNotContain("Wegvlakken zijn klikbare lijnsegmenten voor detailanalyse. Wegdrukte is een vloeiende heatmap", home);
 
         AssertLayerInfo(home, "stopdrukte", "Stopdrukte", "operationele stops, niet automatisch standplaatsen");
@@ -84,9 +86,7 @@ public sealed class LayerInfoUiTests
 
     private static void AssertLayerInfo(string home, string id, string label, string expectedExplanation)
     {
-        Assert.Contains($"ToggleLayerInfo(\"{id}\")", home);
-        Assert.Contains($"aria-controls=\"layer-info-{id}\"", home);
-        Assert.Contains(label, home);
+        Assert.Contains($"new(\"{id}\", \"{label}\"", home);
         Assert.Contains(expectedExplanation, home);
     }
 

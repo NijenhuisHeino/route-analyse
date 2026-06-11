@@ -154,11 +154,11 @@ public sealed partial class RouteAnalysisService
             return new SummaryResponse(0, 0, 0, 0, 0, 0, 0, 0, false);
         }
 
-        var key = CacheKey("summary", NormalizeFilter(filter));
+        var normalized = NormalizeFilter(filter);
+        var key = CacheKey("summary", normalized);
         return await GetOrCreateAsync(key, async () =>
         {
             using var connection = OpenConnection();
-            var normalized = NormalizeFilter(filter);
             var where = BuildWhere(normalized);
             var tripWhere = _store.HasView("daily_trips")
                 ? BuildDailyTripWhere(normalized)
@@ -1048,6 +1048,24 @@ public sealed partial class RouteAnalysisService
             true);
     }
 
+    internal static string SqlDate(DateOnly date)
+    {
+        return "DATE " + DuckDbRouteStore.SqlString(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    private static void AddDateRange(List<string> parts, DateOnly? from, DateOnly? to, string column = "trip_date")
+    {
+        if (from is not null)
+        {
+            parts.Add($"{column} >= {SqlDate(from.Value)}");
+        }
+
+        if (to is not null)
+        {
+            parts.Add($"{column} <= {SqlDate(to.Value)}");
+        }
+    }
+
     private static string BuildWhere(AnalysisFilter filter)
     {
         var parts = new List<string>
@@ -1057,19 +1075,11 @@ public sealed partial class RouteAnalysisService
             "NOT COALESCE(CAST(acties AS VARCHAR), '') ILIKE '%Administrative%'",
         };
 
-        if (filter.DateFrom is not null)
-        {
-            parts.Add($"CAST(trip_date AS DATE) >= DATE {DuckDbRouteStore.SqlString(filter.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (filter.DateTo is not null)
-        {
-            parts.Add($"CAST(trip_date AS DATE) <= DATE {DuckDbRouteStore.SqlString(filter.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
+        AddDateRange(parts, filter.DateFrom, filter.DateTo, "CAST(trip_date AS DATE)");
 
         if (filter.MinDwellMin > 0)
         {
-            parts.Add($"COALESCE(CAST(dwell_min AS DOUBLE), 0) >= {filter.MinDwellMin.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            parts.Add($"COALESCE(CAST(dwell_min AS DOUBLE), 0) >= {filter.MinDwellMin.ToString(CultureInfo.InvariantCulture)}");
         }
 
         AddIn(parts, "vervoerder_type", filter.VervoerderTypes);
@@ -1106,7 +1116,7 @@ public sealed partial class RouteAnalysisService
         {
             "lat IS NOT NULL",
             "lon IS NOT NULL",
-            $"COALESCE(CAST(max_power_kw AS DOUBLE), 0) >= {filter.MinPowerKw.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            $"COALESCE(CAST(max_power_kw AS DOUBLE), 0) >= {filter.MinPowerKw.ToString(CultureInfo.InvariantCulture)}",
             $"COALESCE(CAST(n_connectors AS BIGINT), 0) >= {filter.MinConnectors}",
         };
 
@@ -1365,6 +1375,25 @@ public sealed partial class RouteAnalysisService
             DateTime dateTime => DateOnly.FromDateTime(dateTime),
             _ => DateOnly.TryParse(Convert.ToString(value), out var parsed) ? parsed : null,
         };
+    }
+
+    /// <summary>Splitst een aanwezigheidsvenster in klokuur-slots met de overlap in uren per slot.</summary>
+    private static IEnumerable<(DateTime Slot, double OverlapHours)> EnumerateHourSlots(DateTime start, DateTime end)
+    {
+        var cursor = new DateTime(start.Year, start.Month, start.Day, start.Hour, 0, 0);
+        while (cursor < end)
+        {
+            var next = cursor.AddHours(1);
+            var overlapStart = start > cursor ? start : cursor;
+            var overlapEnd = end < next ? end : next;
+            var overlapHours = (overlapEnd - overlapStart).TotalHours;
+            if (overlapHours > 0)
+            {
+                yield return (cursor, overlapHours);
+            }
+
+            cursor = next;
+        }
     }
 
     private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)

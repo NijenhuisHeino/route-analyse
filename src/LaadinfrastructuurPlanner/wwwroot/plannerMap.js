@@ -792,18 +792,6 @@ window.routePlannerMap = (() => {
       }
     },
 
-    selectDepot: async (depotId) => {
-      if (dotNetRef) {
-        await dotNetRef.invokeMethodAsync("SelectDepotAsync", depotId);
-      }
-    },
-
-    selectRoad: async (lat1, lon1, lat2, lon2, radiusKm = 3) => {
-      if (dotNetRef) {
-        await dotNetRef.invokeMethodAsync("SelectRoadAsync", lat1, lon1, lat2, lon2, radiusKm);
-      }
-    },
-
     clearRoadSelection,
 
     scrollToSelectionDetail: (elementId) => {

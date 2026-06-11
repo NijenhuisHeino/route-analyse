@@ -31,7 +31,16 @@ Gebruik deze variabelen wanneer de data op een andere plek staat:
 ```bash
 ROUTE_ANALYSIS_ORIGINAL_CSV_DIR=/pad/naar/rittendata
 ROUTE_ANALYSIS_EXTERNAL_CACHE_DIR=/pad/naar/cache-backup
+ROUTE_ANALYSIS_REPO_ROOT=/pad/naar/repo            # overschrijft de afgeleide repo-root
+ROUTE_ANALYSIS_DRIVE_DATA_DIR=/pad/naar/drive-data # map met wagenpark- en charter-Excels
+ROUTE_ANALYSIS_FLEET_EXCEL_PATH=/pad/naar/ev_wagenpark_standplaatsen.xlsx
+ROUTE_ANALYSIS_CHARTER_FLEET_EXCEL_PATH="/pad/naar/Standplaatsen charters.xlsx"
+ROUTE_ANALYSIS_ZE_ZONES_PATH=/pad/naar/zez_pc6.csv # of .xlsx/.zip
 ```
+
+Machine-specifieke standaardpaden (Drive-datamap en ZE-zone fallbacks) staan in
+`appsettings.json` onder `RouteAnalysis:DriveDataDir` en `RouteAnalysis:ZeZonesFallbackPaths`;
+omgevingsvariabelen gaan altijd voor.
 
 ## Toegang
 

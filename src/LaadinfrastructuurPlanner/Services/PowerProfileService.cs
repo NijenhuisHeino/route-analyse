@@ -469,30 +469,21 @@ public sealed partial class RouteAnalysisService
         foreach (var powerEvent in events)
         {
             var powerKw = RequiredKwForPowerEvent(powerEvent, capacityKwh, maxVehicleKw);
-            var cursor = new DateTime(powerEvent.StartTime.Year, powerEvent.StartTime.Month, powerEvent.StartTime.Day, powerEvent.StartTime.Hour, 0, 0);
-            while (cursor < powerEvent.EndTime)
+            foreach (var (slot, _) in EnumerateHourSlots(powerEvent.StartTime, powerEvent.EndTime))
             {
-                var next = cursor.AddHours(1);
-                var overlapStart = powerEvent.StartTime > cursor ? powerEvent.StartTime : cursor;
-                var overlapEnd = powerEvent.EndTime < next ? powerEvent.EndTime : next;
-                if (overlapEnd > overlapStart)
+                if (!slots.TryGetValue(slot, out var accumulator))
                 {
-                    if (!slots.TryGetValue(cursor, out var accumulator))
-                    {
-                        accumulator = new PowerAccumulator();
-                        slots[cursor] = accumulator;
-                    }
-
-                    accumulator.Vehicles.Add(powerEvent.VehicleKey);
-                    accumulator.Events++;
-                    accumulator.RequiredKw += powerKw;
-                    if (includeVehicleDemands)
-                    {
-                        accumulator.AddVehicleDemand(powerEvent, capacityKwh, powerKw);
-                    }
+                    accumulator = new PowerAccumulator();
+                    slots[slot] = accumulator;
                 }
 
-                cursor = next;
+                accumulator.Vehicles.Add(powerEvent.VehicleKey);
+                accumulator.Events++;
+                accumulator.RequiredKw += powerKw;
+                if (includeVehicleDemands)
+                {
+                    accumulator.AddVehicleDemand(powerEvent, capacityKwh, powerKw);
+                }
             }
         }
 
@@ -633,15 +624,7 @@ public sealed partial class RouteAnalysisService
             parts.Add($"actie_soort IN ({SqlStringList(ChargeWindowActions)})");
         }
 
-        if (request.DateFrom is not null)
-        {
-            parts.Add($"CAST(trip_date AS DATE) >= DATE {DuckDbRouteStore.SqlString(request.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (request.DateTo is not null)
-        {
-            parts.Add($"CAST(trip_date AS DATE) <= DATE {DuckDbRouteStore.SqlString(request.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
+        AddDateRange(parts, request.DateFrom, request.DateTo, "CAST(trip_date AS DATE)");
 
         if (request.MinDwellMin > 0)
         {

@@ -10,6 +10,7 @@ public sealed class RouteAnalysisOptions
     public string? OriginalCsvDir { get; init; }
     public string? ExternalCacheDir { get; init; }
     public string? ZeZonesSourcePath { get; init; }
+    public string[] ZeZonesFallbackPaths { get; init; } = [];
     public string? FleetExcelPath { get; init; }
     public string? CharterFleetExcelPath { get; init; }
     public VehiclePowerAssumption[] VehiclePowerAssumptions { get; init; } = RouteAnalysisDefaults.VehiclePowerAssumptions;
@@ -35,13 +36,16 @@ public static class RouteAnalysisOptionsFactory
         var zeZonesSourcePath = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_ZE_ZONES_PATH");
         var fleetExcelEnv = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_FLEET_EXCEL_PATH");
         var charterFleetExcelEnv = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_CHARTER_FLEET_EXCEL_PATH");
-        var driveDataDir = "/Users/johnnynijenhuis/Library/CloudStorage/GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/Nijenhuis Truck Solutions/Bedrijven/Den Haag/PostNL/Project/Data analyse ritten/Route analyse tool/data";
+        var driveDataDir = Environment.GetEnvironmentVariable("ROUTE_ANALYSIS_DRIVE_DATA_DIR")
+            ?? configuration?["RouteAnalysis:DriveDataDir"]
+            ?? "";
 
         var powerAssumptions = configuration?.GetSection("RouteAnalysis:VehiclePowerAssumptions").Get<VehiclePowerAssumption[]>()
             ?? RouteAnalysisDefaults.VehiclePowerAssumptions;
         var scenarioInflows = configuration?.GetSection("RouteAnalysis:ScenarioInflows").Get<ScenarioInflowAssumption[]>()
             ?? RouteAnalysisDefaults.ScenarioInflows;
         var focusLocationAlias = configuration?["RouteAnalysis:FocusLocationAlias"];
+        var zeZonesFallbackPaths = configuration?.GetSection("RouteAnalysis:ZeZonesFallbackPaths").Get<string[]>() ?? [];
 
         return new RouteAnalysisOptions
         {
@@ -53,18 +57,24 @@ public static class RouteAnalysisOptionsFactory
             OriginalCsvDir = FirstExistingDirectory(originalCsvDir),
             ExternalCacheDir = FirstExistingDirectory(externalCacheDir),
             ZeZonesSourcePath = FirstExistingFile(zeZonesSourcePath),
+            ZeZonesFallbackPaths = zeZonesFallbackPaths,
             FleetExcelPath = FirstExistingFile(
                 fleetExcelEnv,
-                Path.Combine(driveDataDir, "ev_wagenpark_standplaatsen.xlsx"),
+                CombineOrNull(driveDataDir, "ev_wagenpark_standplaatsen.xlsx"),
                 Path.Combine(cacheDir, "ev_wagenpark_standplaatsen.xlsx")),
             CharterFleetExcelPath = FirstExistingFile(
                 charterFleetExcelEnv,
-                Path.Combine(driveDataDir, "Standplaatsen charters.xlsx"),
+                CombineOrNull(driveDataDir, "Standplaatsen charters.xlsx"),
                 Path.Combine(cacheDir, "Standplaatsen charters.xlsx")),
             VehiclePowerAssumptions = powerAssumptions.Length == 0 ? RouteAnalysisDefaults.VehiclePowerAssumptions : powerAssumptions,
             ScenarioInflows = scenarioInflows.Length == 0 ? RouteAnalysisDefaults.ScenarioInflows : scenarioInflows,
             FocusLocationAlias = string.IsNullOrWhiteSpace(focusLocationAlias) ? "Nieuwegein (Groteweerd 80)" : focusLocationAlias,
         };
+    }
+
+    private static string? CombineOrNull(string directory, string fileName)
+    {
+        return string.IsNullOrWhiteSpace(directory) ? null : Path.Combine(directory, fileName);
     }
 
     private static string? FirstExistingDirectory(params string?[] candidates)

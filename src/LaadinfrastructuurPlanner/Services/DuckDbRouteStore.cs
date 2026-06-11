@@ -10,11 +10,6 @@ namespace LaadinfrastructuurPlanner.Services;
 public sealed class DuckDbRouteStore
 {
     private static readonly string[] Variants = ["full", "eigen", "charter"];
-    private static readonly string[] ZeZoneSourceCandidates =
-    [
-        "/Users/johnnynijenhuis/Library/CloudStorage/GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/20260130_143653_pc6_zeroemissionzones.zip",
-        "/Users/johnnynijenhuis/Library/CloudStorage/GoogleDrive-info@nijenhuistrucksolutions.nl/Mijn Drive/Nijenhuis Truck Solutions/Rapportages/ZE-zones/Postcodes/20250428_115243_pc6_zeroemissionzones.xlsx",
-    ];
     private readonly RouteAnalysisOptions _options;
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private volatile bool _initialized;
@@ -333,7 +328,7 @@ public sealed class DuckDbRouteStore
             }
         }
 
-        return ZeZoneSourceCandidates.FirstOrDefault(File.Exists);
+        return _options.ZeZonesFallbackPaths.FirstOrDefault(File.Exists);
     }
 
     private string BuildManifest()
@@ -486,17 +481,16 @@ public sealed class DuckDbRouteStore
             ? "typed t"
             : $"typed t LEFT JOIN read_parquet({SqlString(geocodePath!)}) g ON t.adres = CAST(g.query AS VARCHAR)";
 
-        Execute(connection,
+        string TypedGeocodedCtes(string source, string actionSelect) =>
             $$"""
-            CREATE OR REPLACE TABLE route_actions AS
-            WITH typed AS (
+            typed AS (
                 SELECT
                     trim({{carrier}}) AS vervoerder,
                     trim({{carrierType}}) AS vervoerder_type_raw,
                     trim({{vehicle}}) AS wagencode,
                     trim({{vehicleType}}) AS wagentype_omschrijving,
                     trim({{tripId}}) AS trip_id,
-                    lower(trim({{action}})) AS actie_soort,
+                    {{actionSelect}},
                     trim({{locationName}}) AS locatie_naam,
                     trim({{address}}) AS adres,
                     upper(trim({{licensePlate}})) AS kenteken,
@@ -507,7 +501,7 @@ public sealed class DuckDbRouteStore
                     {{segmentDistance}} AS afstand_km_segment,
                     {{directLatSql}} AS direct_lat,
                     {{directLonSql}} AS direct_lon
-                FROM raw_csv
+                FROM {{source}}
             ),
             geocoded AS (
                 SELECT
@@ -518,7 +512,24 @@ public sealed class DuckDbRouteStore
                 WHERE t.wagencode <> ''
                     AND t.trip_id <> ''
                     AND t.gepland_start IS NOT NULL
-            ),
+            )
+            """;
+
+        static string VehicleClassCase(string own, string charter, string unknown) =>
+            $"""
+            CASE
+                WHEN lower(vervoerder_type_raw) LIKE '%eigen%' OR lower(vervoerder_type_raw) LIKE '%own%' THEN '{own}'
+                WHEN lower(vervoerder_type_raw) LIKE '%charter%' OR lower(vervoerder_type_raw) LIKE '%sub%' THEN '{charter}'
+                WHEN lower(vervoerder) LIKE '%eigen%' THEN '{own}'
+                WHEN lower(vervoerder) LIKE '%uitbesteed%' OR lower(vervoerder) LIKE '%charter%' THEN '{charter}'
+                ELSE '{unknown}'
+            END
+            """;
+
+        Execute(connection,
+            $$"""
+            CREATE OR REPLACE TABLE route_actions AS
+            WITH {{TypedGeocodedCtes("raw_csv", $"lower(trim({action})) AS actie_soort")}},
             sequenced AS (
                 SELECT
                     *,
@@ -532,13 +543,7 @@ public sealed class DuckDbRouteStore
             SELECT
                 wagencode,
                 vervoerder,
-                CASE
-                    WHEN lower(vervoerder_type_raw) LIKE '%eigen%' OR lower(vervoerder_type_raw) LIKE '%own%' THEN 'own'
-                    WHEN lower(vervoerder_type_raw) LIKE '%charter%' OR lower(vervoerder_type_raw) LIKE '%sub%' THEN 'charter'
-                    WHEN lower(vervoerder) LIKE '%eigen%' THEN 'own'
-                    WHEN lower(vervoerder) LIKE '%uitbesteed%' OR lower(vervoerder) LIKE '%charter%' THEN 'charter'
-                    ELSE 'unknown'
-                END AS vehicle_class,
+                {{VehicleClassCase("own", "charter", "unknown")}} AS vehicle_class,
                 trip_date,
                 trip_id,
                 CAST(action_seq AS INTEGER) AS action_seq,
@@ -570,36 +575,7 @@ public sealed class DuckDbRouteStore
                 FROM raw_csv
                 {{actionFilter}}
             ),
-            typed AS (
-                SELECT
-                    trim({{carrier}}) AS vervoerder,
-                    trim({{carrierType}}) AS vervoerder_type_raw,
-                    trim({{vehicle}}) AS wagencode,
-                    trim({{vehicleType}}) AS wagentype_omschrijving,
-                    trim({{tripId}}) AS trip_id,
-                    trim({{action}}) AS acties,
-                    trim({{locationName}}) AS locatie_naam,
-                    trim({{address}}) AS adres,
-                    upper(trim({{licensePlate}})) AS kenteken,
-                    regexp_replace(upper(trim({{licensePlate}})), '[^A-Z0-9]', '', 'g') AS kenteken_norm,
-                    {{plannedStart}} AS gepland_start,
-                    {{plannedEnd}} AS gepland_eind,
-                    {{distance}} AS afstand_km_trip,
-                    {{segmentDistance}} AS afstand_km_segment,
-                    {{directLatSql}} AS direct_lat,
-                    {{directLonSql}} AS direct_lon
-                FROM raw
-            ),
-            geocoded AS (
-                SELECT
-                    t.*,
-                    {{latSql}} AS lat,
-                    {{lonSql}} AS lon
-                FROM {{fromSql}}
-                WHERE t.wagencode <> ''
-                    AND t.trip_id <> ''
-                    AND t.gepland_start IS NOT NULL
-            ),
+            {{TypedGeocodedCtes("raw", $"trim({action}) AS acties")}},
             sequenced AS (
                 SELECT
                     *,
@@ -613,13 +589,7 @@ public sealed class DuckDbRouteStore
             SELECT
                 wagencode,
                 vervoerder,
-                CASE
-                    WHEN lower(vervoerder_type_raw) LIKE '%eigen%' OR lower(vervoerder_type_raw) LIKE '%own%' THEN 'eigen'
-                    WHEN lower(vervoerder_type_raw) LIKE '%charter%' OR lower(vervoerder_type_raw) LIKE '%sub%' THEN 'charter'
-                    WHEN lower(vervoerder) LIKE '%eigen%' THEN 'eigen'
-                    WHEN lower(vervoerder) LIKE '%uitbesteed%' OR lower(vervoerder) LIKE '%charter%' THEN 'charter'
-                    ELSE 'onbekend'
-                END AS vervoerder_type,
+                {{VehicleClassCase("eigen", "charter", "onbekend")}} AS vervoerder_type,
                 trip_date,
                 trip_id,
                 CAST(stop_seq AS INTEGER) AS stop_seq,

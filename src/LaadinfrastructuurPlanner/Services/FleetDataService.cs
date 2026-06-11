@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Compression;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using DuckDB.NET.Data;
 using LaadinfrastructuurPlanner.Models;

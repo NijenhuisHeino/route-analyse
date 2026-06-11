@@ -567,28 +567,18 @@ public sealed partial class RouteAnalysisService
                 continue;
             }
 
-            var cursor = new DateTime(load.Row.StartTime.Year, load.Row.StartTime.Month, load.Row.StartTime.Day, load.Row.StartTime.Hour, 0, 0);
-            while (cursor < load.Row.EndTime)
+            foreach (var (slot, overlapHours) in EnumerateHourSlots(load.Row.StartTime, load.Row.EndTime))
             {
-                var next = cursor.AddHours(1);
-                var overlapStart = load.Row.StartTime > cursor ? load.Row.StartTime : cursor;
-                var overlapEnd = load.Row.EndTime < next ? load.Row.EndTime : next;
-                var overlapHours = Math.Max(0, (overlapEnd - overlapStart).TotalHours);
-                if (overlapHours > 0)
+                if (!slots.TryGetValue(slot, out var accumulator))
                 {
-                    if (!slots.TryGetValue(cursor, out var accumulator))
-                    {
-                        accumulator = new HourAccumulator();
-                        slots[cursor] = accumulator;
-                    }
-
-                    accumulator.VehicleKeys.Add(VehicleGroupKey(load.Row));
-                    accumulator.Events++;
-                    accumulator.DemandKwh += load.RequiredKw * overlapHours;
-                    accumulator.RequiredKw += load.RequiredKw;
+                    accumulator = new HourAccumulator();
+                    slots[slot] = accumulator;
                 }
 
-                cursor = next;
+                accumulator.VehicleKeys.Add(VehicleGroupKey(load.Row));
+                accumulator.Events++;
+                accumulator.DemandKwh += load.RequiredKw * overlapHours;
+                accumulator.RequiredKw += load.RequiredKw;
             }
         }
 
@@ -638,39 +628,29 @@ public sealed partial class RouteAnalysisService
                 continue;
             }
 
-            var cursor = new DateTime(load.Row.StartTime.Year, load.Row.StartTime.Month, load.Row.StartTime.Day, load.Row.StartTime.Hour, 0, 0);
-            while (cursor < load.Row.EndTime)
+            foreach (var (slot, overlapHours) in EnumerateHourSlots(load.Row.StartTime, load.Row.EndTime))
             {
-                var next = cursor.AddHours(1);
-                var overlapStart = load.Row.StartTime > cursor ? load.Row.StartTime : cursor;
-                var overlapEnd = load.Row.EndTime < next ? load.Row.EndTime : next;
-                var overlapHours = Math.Max(0, (overlapEnd - overlapStart).TotalHours);
-                if (overlapHours > 0)
+                if (!slots.TryGetValue(slot, out var accumulator))
                 {
-                    if (!slots.TryGetValue(cursor, out var accumulator))
-                    {
-                        accumulator = new HourAccumulator();
-                        slots[cursor] = accumulator;
-                    }
-
-                    accumulator.VehicleKeys.Add(VehicleGroupKey(load.Row));
-                    accumulator.Events++;
-                    accumulator.DemandKwh += load.RequiredKw * overlapHours;
-                    accumulator.RequiredKw += load.RequiredKw;
-                    foreach (var plate in SplitLicensePlates(load.Row.Kentekens))
-                    {
-                        accumulator.Kentekens.Add(plate);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(load.Row.Wagencode))
-                    {
-                        accumulator.Wagencodes.Add(load.Row.Wagencode);
-                    }
-
-                    accumulator.AddVehicleDemand(load);
+                    accumulator = new HourAccumulator();
+                    slots[slot] = accumulator;
                 }
 
-                cursor = next;
+                accumulator.VehicleKeys.Add(VehicleGroupKey(load.Row));
+                accumulator.Events++;
+                accumulator.DemandKwh += load.RequiredKw * overlapHours;
+                accumulator.RequiredKw += load.RequiredKw;
+                foreach (var plate in SplitLicensePlates(load.Row.Kentekens))
+                {
+                    accumulator.Kentekens.Add(plate);
+                }
+
+                if (!string.IsNullOrWhiteSpace(load.Row.Wagencode))
+                {
+                    accumulator.Wagencodes.Add(load.Row.Wagencode);
+                }
+
+                accumulator.AddVehicleDemand(load);
             }
         }
 
@@ -1042,16 +1022,7 @@ public sealed partial class RouteAnalysisService
     private static string BuildDailyTripWhere(AnalysisFilter filter)
     {
         var parts = new List<string> { "distance_km >= 0" };
-        if (filter.DateFrom is not null)
-        {
-            parts.Add($"trip_date >= DATE {DuckDbRouteStore.SqlString(filter.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (filter.DateTo is not null)
-        {
-            parts.Add($"trip_date <= DATE {DuckDbRouteStore.SqlString(filter.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
-
+        AddDateRange(parts, filter.DateFrom, filter.DateTo);
         AddIn(parts, "vervoerder_type", filter.VervoerderTypes);
         AddIn(parts, "vervoerder", filter.Vervoerders);
         AddVehicleIn(parts, filter.Wagencodes);
@@ -1062,16 +1033,7 @@ public sealed partial class RouteAnalysisService
     private static string BuildOvernightWhere(AnalysisFilter filter)
     {
         var parts = new List<string> { "day_km >= 0" };
-        if (filter.DateFrom is not null)
-        {
-            parts.Add($"trip_date >= DATE {DuckDbRouteStore.SqlString(filter.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (filter.DateTo is not null)
-        {
-            parts.Add($"trip_date <= DATE {DuckDbRouteStore.SqlString(filter.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
-
+        AddDateRange(parts, filter.DateFrom, filter.DateTo);
         AddIn(parts, "vervoerder_type", filter.VervoerderTypes);
         AddIn(parts, "vervoerder", filter.Vervoerders);
         AddVehicleIn(parts, filter.Wagencodes);
@@ -1123,16 +1085,7 @@ public sealed partial class RouteAnalysisService
             $"{HaversineSql("start_lat", "start_lon", SqlDouble(request.Lat), SqlDouble(request.Lon))} <= {SqlDouble(request.RadiusKm)}",
         };
 
-        if (request.DateFrom is not null)
-        {
-            parts.Add($"trip_date >= DATE {DuckDbRouteStore.SqlString(request.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (request.DateTo is not null)
-        {
-            parts.Add($"trip_date <= DATE {DuckDbRouteStore.SqlString(request.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
-
+        AddDateRange(parts, request.DateFrom, request.DateTo);
         AddIn(parts, "vervoerder_type", request.VervoerderTypes);
         AddIn(parts, "vervoerder", request.Vervoerders);
         AddVehicleIn(parts, request.Wagencodes);
@@ -1155,16 +1108,7 @@ public sealed partial class RouteAnalysisService
             $"{HaversineSql("mid_lat", "mid_lon", SqlDouble(midLat), SqlDouble(midLon))} <= {SqlDouble(radius)}",
         };
 
-        if (request.DateFrom is not null)
-        {
-            parts.Add($"trip_date >= DATE {DuckDbRouteStore.SqlString(request.DateFrom.Value.ToString("yyyy-MM-dd"))}");
-        }
-
-        if (request.DateTo is not null)
-        {
-            parts.Add($"trip_date <= DATE {DuckDbRouteStore.SqlString(request.DateTo.Value.ToString("yyyy-MM-dd"))}");
-        }
-
+        AddDateRange(parts, request.DateFrom, request.DateTo);
         AddIn(parts, "vervoerder_type", request.VervoerderTypes);
         AddIn(parts, "vervoerder", request.Vervoerders);
         AddVehicleIn(parts, request.Wagencodes);
@@ -1217,11 +1161,6 @@ public sealed partial class RouteAnalysisService
                 * pow(sin(radians(({{lon2}}) - ({{lon1}})) / 2.0), 2)
             )))
             """;
-    }
-
-    private static double UsableKwh(ChargingScenario scenario)
-    {
-        return scenario.CapacityKwh * Math.Max(0, scenario.TargetSocPct - scenario.MinSocPct) / 100.0;
     }
 
     private static string Recommend(double totalMwh, double publicDemandMwh, bool roadSelection = false)
