@@ -345,6 +345,76 @@ public sealed class RouteAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RoadBreakDemandLegendReflectsVisibleLines()
+    {
+        var demand = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            RoadTopPercent = 100,
+            KwhPerKm = 1.0
+        });
+
+        var legend = demand.Legend;
+        Assert.NotNull(legend);
+        Assert.NotEmpty(demand.Lines);
+        Assert.Equal(demand.Lines.Min(x => x.Passages), legend.MinPassages);
+        Assert.Equal(demand.Lines.Max(x => x.Passages), legend.MaxPassages);
+
+        Assert.NotEmpty(legend.GradientStops);
+        Assert.Equal(legend.MinPassages, legend.GradientStops[0].Passages);
+        Assert.Equal(legend.MaxPassages, legend.GradientStops[^1].Passages);
+        for (var i = 1; i < legend.GradientStops.Length; i++)
+        {
+            Assert.True(legend.GradientStops[i].Passages > legend.GradientStops[i - 1].Passages);
+        }
+        Assert.All(legend.GradientStops, stop => Assert.StartsWith("#", stop.Color));
+
+        Assert.NotEmpty(legend.Bins);
+        Assert.Equal(legend.MinPassages, legend.Bins[0].FromPassages);
+        Assert.Equal(legend.MaxPassages, legend.Bins[^1].ToPassages);
+        for (var i = 1; i < legend.Bins.Length; i++)
+        {
+            Assert.True(legend.Bins[i].FromPassages > legend.Bins[i - 1].ToPassages);
+        }
+        Assert.All(legend.Bins, bin => Assert.True(bin.FromPassages <= bin.ToPassages));
+        Assert.Equal(demand.Lines.Length, legend.Bins.Sum(x => x.LineCount));
+    }
+
+    [Fact]
+    public async Task RoadBreakDemandLegendCollapsesWhenAllPassagesEqual()
+    {
+        var demand = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            RoadTopPercent = 1,
+            KwhPerKm = 1.0
+        });
+
+        var legend = demand.Legend;
+        Assert.NotNull(legend);
+        Assert.Equal(legend.MinPassages, legend.MaxPassages);
+        var stop = Assert.Single(legend.GradientStops);
+        Assert.Equal(legend.MaxPassages, stop.Passages);
+        var bin = Assert.Single(legend.Bins);
+        Assert.Equal("Alle wegvlakken", bin.Label);
+        Assert.Equal(demand.Lines.Length, bin.LineCount);
+    }
+
+    [Fact]
+    public async Task RoadBreakDemandLegendIsNullWithoutLines()
+    {
+        var demand = await _service.GetRoadBreakDemandMapAsync(new RoadBreakDemandRequest
+        {
+            RoadThreshold = 1,
+            RoadTopPercent = 0,
+            KwhPerKm = 1.0
+        });
+
+        Assert.Empty(demand.Lines);
+        Assert.Null(demand.Legend);
+    }
+
+    [Fact]
     public async Task RoadBreakDemandCapsVehicleEnergyAtTargetBatteryCapacity()
     {
         var detail = await _service.GetRoadBreakDemandDetailAsync(new RoadBreakDemandDetailRequest

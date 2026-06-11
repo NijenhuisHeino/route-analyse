@@ -2,6 +2,8 @@ window.routePlannerMap = (() => {
   let map;
   let abortController;
   let dotNetRef;
+  let lastBreakFeatures = null;
+  let lastRoadFeatures = null;
 
   function apiUrl(path) {
     return new URL(`/api/${path}`, window.location.origin).toString();
@@ -250,37 +252,11 @@ window.routePlannerMap = (() => {
     };
   }
 
-  function showStandplaatsPopup(feature, sourceLabel, disclaimer) {
-    if (!feature) return;
-    const p = feature.properties || {};
-    let vehicles = [];
-    try { vehicles = JSON.parse(p.vehicleList || "[]"); } catch { vehicles = []; }
-    const rows = vehicles.slice(0, 80).map((v) => {
-      const trips = Number(v.tripsInData || 0);
-      const tripsLabel = trips > 0 ? `${trips.toLocaleString("nl-NL")} ritten` : "geen ritten in ritdata";
-      const identifier = v.kenteken || v.vlootnummer || "";
-      const secondary = v.kenteken ? v.vlootnummer : v.typeLocatie;
-      const vehicleType = v.merk || v.soortVoertuig || v.soortBrandstof || "";
-      return `<tr><td><strong>${escapeHtml(identifier)}</strong></td><td>${escapeHtml(secondary || "")}</td><td>${escapeHtml(vehicleType)}</td><td>${escapeHtml(tripsLabel)}</td></tr>`;
-    }).join("");
-    const hiddenCount = vehicles.length - Math.min(vehicles.length, 80);
-    const hiddenNote = hiddenCount > 0 ? `<p class="standplaats-popup__hidden">+${hiddenCount} meer voertuig(en) niet getoond</p>` : "";
-    new maplibregl.Popup({ closeButton: true, maxWidth: "460px" })
-      .setLngLat(feature.geometry.coordinates)
-      .setHTML(`
-        <div class="standplaats-popup">
-          <strong>${escapeHtml(p.name || sourceLabel)}</strong>
-          <span>${escapeHtml(sourceLabel)}${p.regio ? " · " + escapeHtml(p.regio) : ""}</span>
-          <span>${Number(p.vehicles || 0).toLocaleString("nl-NL")} voertuigen · ${Number(p.matchedInTrips || 0).toLocaleString("nl-NL")} met ritten in data</span>
-          <table class="standplaats-popup__table">
-            <thead><tr><th>Voertuig</th><th>Inzet/vloot</th><th>Type</th><th>Activiteit</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-          ${hiddenNote}
-          <p class="standplaats-popup__disclaimer">${escapeHtml(disclaimer)}</p>
-        </div>
-      `)
-      .addTo(map);
+  function selectStandplaatsFeature(feature, isCharter) {
+    const depotId = feature?.properties?.depotId;
+    if (!depotId || !dotNetRef) return;
+    clearRoadSelection();
+    dotNetRef.invokeMethodAsync("SelectStandplaatsAsync", depotId, !!isCharter);
   }
 
   function addLayers() {
@@ -572,7 +548,7 @@ window.routePlannerMap = (() => {
       });
 
       map.on("click", "fleet-standplaatsen", (event) => {
-        showStandplaatsPopup(event.features?.[0], "PostNL-wagenparkstandplaats", "Standplaats is ruw gegeocodeerd op plaatsnaam.");
+        selectStandplaatsFeature(event.features?.[0], false);
       });
       map.on("mouseenter", "fleet-standplaatsen", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "fleet-standplaatsen", () => { map.getCanvas().style.cursor = ""; });
@@ -593,7 +569,7 @@ window.routePlannerMap = (() => {
       });
 
       map.on("click", "charter-standplaatsen", (event) => {
-        showStandplaatsPopup(event.features?.[0], "Charterstandplaats", "Charterstandplaats uit aparte Excel; bedoeld als fysiek shift-startpunt.");
+        selectStandplaatsFeature(event.features?.[0], true);
       });
       map.on("mouseenter", "charter-standplaatsen", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "charter-standplaatsen", () => { map.getCanvas().style.cursor = ""; });
@@ -642,6 +618,26 @@ window.routePlannerMap = (() => {
     setData("road-selection", emptyFeatureCollection());
   }
 
+  function focusSegment(collection, segmentId, lat1, lon1, lat2, lon2) {
+    if (!map || !isStyleReady()) return;
+    const feature = (collection?.features || []).find((f) => f.properties?.segmentId === segmentId);
+    const coords = feature?.geometry?.coordinates?.length >= 2
+      ? feature.geometry.coordinates
+      : [[lon1, lat1], [lon2, lat2]];
+    setData("road-selection", {
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        properties: feature?.properties || { segmentId: segmentId || "" },
+        geometry: { type: "LineString", coordinates: coords }
+      }]
+    });
+    setVisibility("road-selection", true);
+    const bounds = new maplibregl.LngLatBounds();
+    coords.forEach((coordinate) => bounds.extend(coordinate));
+    if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 96, maxZoom: 12, duration: 600 });
+  }
+
   async function postJson(path, payload, signal) {
     const response = await fetch(apiUrl(path), {
       method: "POST",
@@ -659,6 +655,91 @@ window.routePlannerMap = (() => {
     if (map.getLayer(layer)) {
       map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
     }
+  }
+
+  function applyRoadBreakDemandPaint(legend) {
+    if (!map.getLayer("road-break-demand")) return;
+    const stops = (legend?.gradientStops || []).filter(
+      (stop, index, all) => index === 0 || stop.passages > all[index - 1].passages
+    );
+    if (stops.length >= 2) {
+      const color = ["interpolate", ["linear"], ["get", "passages"]];
+      stops.forEach((stop) => color.push(stop.passages, stop.color));
+      const vMin = stops[0].passages;
+      const vMax = stops[stops.length - 1].passages;
+      map.setPaintProperty("road-break-demand", "line-color", color);
+      map.setPaintProperty("road-break-demand", "line-width",
+        ["interpolate", ["linear"], ["get", "passages"], vMin, 3, vMax, 14]);
+      map.setPaintProperty("road-break-demand-casing", "line-width",
+        ["interpolate", ["linear"], ["get", "passages"], vMin, 7, vMax, 18]);
+    } else if (stops.length === 1) {
+      map.setPaintProperty("road-break-demand", "line-color", stops[0].color || "#fb923c");
+      map.setPaintProperty("road-break-demand", "line-width", 5);
+      map.setPaintProperty("road-break-demand-casing", "line-width", 9);
+    }
+  }
+
+  function buildMapOverview(breakDemand, breakFeatures, overnight, standplaatsen, charterStandplaatsen) {
+    const topBreakSegments = (breakFeatures?.features || [])
+      .slice()
+      .sort((a, b) => (b.properties.passages || 0) - (a.properties.passages || 0))
+      .slice(0, 10)
+      .map((feature) => {
+        const coords = feature.geometry.coordinates;
+        return {
+          segmentId: feature.properties.segmentId || "",
+          direction: feature.properties.direction || "",
+          passages: feature.properties.passages || 0,
+          vehicles: feature.properties.vehicles || 0,
+          peakMw: feature.properties.peakMw || 0,
+          totalKwh: feature.properties.totalKwh || 0,
+          lat1: coords[0][1],
+          lon1: coords[0][0],
+          lat2: coords[coords.length - 1][1],
+          lon2: coords[coords.length - 1][0],
+          radiusKm: feature.properties.radiusKm || 3
+        };
+      });
+
+    const topDepots = (overnight?.locations || [])
+      .slice()
+      .sort((a, b) => (b.events || 0) - (a.events || 0) || (b.uniqueVehicles || 0) - (a.uniqueVehicles || 0))
+      .slice(0, 10)
+      .map((location) => ({
+        depotId: location.depotId || "",
+        address: location.address || location.depotId || "",
+        uniqueVehicles: location.uniqueVehicles || 0,
+        events: location.events || 0,
+        totalMwh: location.totalMwh || 0,
+        shortageMwh: location.shortageMwh || 0,
+        recommendation: location.recommendation || "",
+        lat: location.lat,
+        lon: location.lon
+      }));
+
+    const standplaatsRows = (standplaatsen?.depots || []).map((depot) => ({ depot, isCharter: false }))
+      .concat((charterStandplaatsen?.depots || []).map((depot) => ({ depot, isCharter: true })));
+    const topStandplaatsen = standplaatsRows
+      .sort((a, b) => (b.depot.vehicles || 0) - (a.depot.vehicles || 0))
+      .slice(0, 10)
+      .map(({ depot, isCharter }) => ({
+        depotId: depot.depotId || "",
+        name: depot.name || "",
+        regio: depot.regio || "",
+        typeLocatie: depot.typeLocatie || "",
+        vehicles: depot.vehicles || 0,
+        matchedInTrips: depot.matchedInTrips || 0,
+        isCharter,
+        lat: depot.lat,
+        lon: depot.lon
+      }));
+
+    return {
+      breakDemandLegend: breakDemand?.legend || null,
+      topBreakSegments,
+      topDepots,
+      topStandplaatsen
+    };
   }
 
   function isStyleReady() {
@@ -739,11 +820,15 @@ window.routePlannerMap = (() => {
           : Promise.resolve({ status: "skipped", depots: [] });
         const [stops, roads, breakDemand, breakRoads, chargers, overnight, standplaatsen, charterStandplaatsen] = await Promise.all([stopsPromise, roadsPromise, breakDemandPromise, breakRoadsPromise, chargersPromise, overnightPromise, standplaatsenPromise, charterStandplaatsenPromise]);
         const breakDemandFeatures = roadBreakDemandCollection(breakDemand.lines, breakRoads.lines);
+        const roadFeatures = lineCollection(roads.lines);
+        lastBreakFeatures = breakDemandFeatures;
+        lastRoadFeatures = roadFeatures;
 
         setData("stop-heat", featureCollection(stops.heatPoints));
         setData("stop-markers", featureCollection(stops.markers, true));
-        setData("road-lines", lineCollection(roads.lines));
+        setData("road-lines", roadFeatures);
         setData("road-break-demand", breakDemandFeatures);
+        applyRoadBreakDemandPaint(breakDemand.legend);
         setData("road-heat", featureCollection(roads.heatPoints));
         setData("chargers", chargerCollection(chargers.markers));
         setData("overnight-locations", overnightCollection(overnight.locations));
@@ -784,6 +869,16 @@ window.routePlannerMap = (() => {
         if (options.showStandplaatsen && standplaatsen.status !== "ok") notes.push("standplaatsen niet beschikbaar");
         if (options.showCharterStandplaatsen && charterStandplaatsen.status !== "ok") notes.push("charterstandplaatsen niet beschikbaar");
         status(notes.length ? `Kaart geladen · ${notes.join(" · ")}` : "Kaart geladen");
+
+        if (dotNetRef) {
+          try {
+            await dotNetRef.invokeMethodAsync(
+              "UpdateMapOverviewAsync",
+              buildMapOverview(breakDemand, breakDemandFeatures, overnight, standplaatsen, charterStandplaatsen));
+          } catch (overviewError) {
+            console.debug("map overview callback failed", overviewError);
+          }
+        }
       } catch (error) {
         if (error.name !== "AbortError") {
           console.error(error);
@@ -805,6 +900,19 @@ window.routePlannerMap = (() => {
     },
 
     clearRoadSelection,
+
+    focusPoint: (lat, lon) => {
+      if (!map) return;
+      map.easeTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 11), duration: 600 });
+    },
+
+    focusBreakSegment: (segmentId, lat1, lon1, lat2, lon2) => {
+      focusSegment(lastBreakFeatures, segmentId, lat1, lon1, lat2, lon2);
+    },
+
+    focusRoadSegment: (segmentId, lat1, lon1, lat2, lon2) => {
+      focusSegment(lastRoadFeatures, segmentId, lat1, lon1, lat2, lon2);
+    },
 
     scrollToSelectionDetail: (elementId) => {
       const scroll = () => {

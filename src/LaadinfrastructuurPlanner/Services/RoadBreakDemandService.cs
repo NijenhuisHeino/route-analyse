@@ -33,7 +33,8 @@ public sealed partial class RouteAnalysisService
                 normalized.BreakDurationHours,
                 lines,
                 result.Diagnostics,
-                true);
+                true,
+                BuildRoadBreakDemandLegend(lines));
         });
     }
 
@@ -332,6 +333,72 @@ public sealed partial class RouteAnalysisService
             .ThenByDescending(x => x.PeakMw)
             .ThenByDescending(x => x.TotalKwh)
             .ToArray();
+    }
+
+    private static readonly string[] RoadBreakGradientColors = ["#fde047", "#facc15", "#fb923c", "#ef4444", "#7f1d1d"];
+    private static readonly double[] RoadBreakGradientQuantiles = [0, 0.25, 0.5, 0.75, 1.0];
+
+    private static RoadBreakDemandLegend? BuildRoadBreakDemandLegend(RoadBreakDemandLine[] lines)
+    {
+        if (lines.Length == 0)
+        {
+            return null;
+        }
+
+        var values = lines.Select(x => x.Passages).OrderBy(x => x).ToArray();
+        var distinct = values.Distinct().ToArray();
+
+        var stops = new List<RoadBreakDemandGradientStop>();
+        for (var i = 0; i < RoadBreakGradientQuantiles.Length; i++)
+        {
+            var value = values[(int)Math.Round(RoadBreakGradientQuantiles[i] * (values.Length - 1))];
+            if (stops.Count == 0 || value > stops[^1].Passages)
+            {
+                stops.Add(new RoadBreakDemandGradientStop(value, RoadBreakGradientColors[i]));
+            }
+        }
+
+        if (stops.Count == 1)
+        {
+            stops[0] = stops[0] with { Color = "#fb923c" };
+        }
+
+        return new RoadBreakDemandLegend(values[0], values[^1], stops.ToArray(), BuildRoadBreakLegendBins(values, distinct));
+    }
+
+    private static RoadBreakDemandLegendBin[] BuildRoadBreakLegendBins(long[] sortedValues, long[] distinct)
+    {
+        int CountBetween(long from, long to) => sortedValues.Count(v => v >= from && v <= to);
+
+        if (distinct.Length == 1)
+        {
+            return [new RoadBreakDemandLegendBin("Alle wegvlakken", "#fb923c", distinct[0], distinct[0], sortedValues.Length)];
+        }
+
+        if (distinct.Length == 2)
+        {
+            return
+            [
+                new RoadBreakDemandLegendBin("Geel", "#facc15", distinct[0], distinct[0], CountBetween(distinct[0], distinct[0])),
+                new RoadBreakDemandLegendBin("Rood", "#dc2626", distinct[1], distinct[1], CountBetween(distinct[1], distinct[1]))
+            ];
+        }
+
+        var cut1 = distinct[(int)Math.Ceiling(distinct.Length / 3.0) - 1];
+        var cut2 = distinct[(int)Math.Ceiling(2.0 * distinct.Length / 3.0) - 1];
+        if (cut2 <= cut1)
+        {
+            cut2 = distinct.First(v => v > cut1);
+        }
+
+        var min = distinct[0];
+        var max = distinct[^1];
+        return
+        [
+            new RoadBreakDemandLegendBin("Geel", "#facc15", min, cut1, CountBetween(min, cut1)),
+            new RoadBreakDemandLegendBin("Oranje", "#fb923c", cut1 + 1, cut2, CountBetween(cut1 + 1, cut2)),
+            new RoadBreakDemandLegendBin("Rood", "#dc2626", cut2 + 1, max, CountBetween(cut2 + 1, max))
+        ];
     }
 
     private static RoadBreakQuarterCell[] BuildRoadBreakQuarterProfile(

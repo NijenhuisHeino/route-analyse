@@ -112,6 +112,12 @@ public sealed class PlannerApiEndpointTests : IDisposable
         });
         Assert.Equal("ok", breakDemand.Status);
         Assert.NotEmpty(breakDemand.Lines);
+        Assert.NotNull(breakDemand.Legend);
+        Assert.Equal(breakDemand.Lines.Min(x => x.Passages), breakDemand.Legend.MinPassages);
+        Assert.Equal(breakDemand.Lines.Max(x => x.Passages), breakDemand.Legend.MaxPassages);
+        Assert.NotEmpty(breakDemand.Legend.GradientStops);
+        Assert.NotEmpty(breakDemand.Legend.Bins);
+        Assert.Equal(breakDemand.Lines.Length, breakDemand.Legend.Bins.Sum(x => x.LineCount));
 
         var breakDemandDetail = await PostAsync<RoadBreakDemandDetailResponse>(client, "/api/roads/break-demand/detail", new RoadBreakDemandDetailRequest
         {

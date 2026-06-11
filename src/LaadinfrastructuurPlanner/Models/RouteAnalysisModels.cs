@@ -226,7 +226,25 @@ public sealed record RoadBreakDemandMapResponse(
     double BreakDurationHours,
     RoadBreakDemandLine[] Lines,
     RoadBreakDemandDiagnostics Diagnostics,
-    bool FromCache);
+    bool FromCache,
+    RoadBreakDemandLegend? Legend = null);
+
+public sealed record RoadBreakDemandGradientStop(
+    long Passages,
+    string Color);
+
+public sealed record RoadBreakDemandLegendBin(
+    string Label,
+    string Color,
+    long FromPassages,
+    long ToPassages,
+    int LineCount);
+
+public sealed record RoadBreakDemandLegend(
+    long MinPassages,
+    long MaxPassages,
+    RoadBreakDemandGradientStop[] GradientStops,
+    RoadBreakDemandLegendBin[] Bins);
 
 public sealed record RoadBreakDemandLine(
     double Lat1,
@@ -596,3 +614,44 @@ public sealed record FleetDepotsResponse(
     string Disclaimer,
     long TotalVehicles,
     FleetDepot[] Depots);
+
+public sealed record MapOverviewBreakSegment(
+    string SegmentId,
+    string Direction,
+    long Passages,
+    long Vehicles,
+    double PeakMw,
+    double TotalKwh,
+    double Lat1,
+    double Lon1,
+    double Lat2,
+    double Lon2,
+    double RadiusKm);
+
+public sealed record MapOverviewDepot(
+    string DepotId,
+    string Address,
+    long UniqueVehicles,
+    long Events,
+    double TotalMwh,
+    double ShortageMwh,
+    string Recommendation,
+    double Lat,
+    double Lon);
+
+public sealed record MapOverviewStandplaats(
+    string DepotId,
+    string Name,
+    string Regio,
+    string TypeLocatie,
+    long Vehicles,
+    long MatchedInTrips,
+    bool IsCharter,
+    double Lat,
+    double Lon);
+
+public sealed record MapOverviewState(
+    RoadBreakDemandLegend? BreakDemandLegend,
+    MapOverviewBreakSegment[] TopBreakSegments,
+    MapOverviewDepot[] TopDepots,
+    MapOverviewStandplaats[] TopStandplaatsen);

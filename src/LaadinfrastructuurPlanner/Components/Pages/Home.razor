@@ -1,6 +1,7 @@
 ﻿@page "/"
 @implements IDisposable
 @inject RouteAnalysisService Analysis
+@inject FleetDataService Fleet
 @inject IJSRuntime JS
 
 <PageTitle>Laadinfrastructuur Planner</PageTitle>
@@ -105,7 +106,7 @@
                 </div>
                 @if (OpenLayerInfoId == "pauzelaadvraag")
                 {
-                    <p id="layer-info-pauzelaadvraag" class="layer-info-panel">Wegvlakken waar voertuigen volgens de rijtijd-teller tussen het ingestelde pauzevenster vallen. De topfilter rangschikt op aantal pauzepassages; kleur en dikte tonen ook dat aantal. De piek-MW blijft beschikbaar in het detail.</p>
+                    <p id="layer-info-pauzelaadvraag" class="layer-info-panel">Wegvlakken waar voertuigen volgens de rijtijd-teller tussen het ingestelde pauzevenster vallen. De topfilter rangschikt op aantal pauzepassages; de geel-oranje-rode kleurschaal past zich aan de zichtbare dataverdeling aan en de legenda toont de bijbehorende absolute aantallen. De piek-MW blijft beschikbaar in het detail.</p>
                 }
             </div>
             <div class="layer-toggle-item">
@@ -579,11 +580,29 @@
 
                     @if (!LegendCollapsed && ShowRoadBreakDemand)
                     {
+                        var breakLegend = MapOverview?.BreakDemandLegend;
                         <div class="legend-item">
-                            <span class="legend-line road-break-demand-line"></span>
+                            <span class="legend-line road-break-demand-line" style="@(breakLegend is null ? null : BreakLegendGradientStyle(breakLegend))"></span>
                             <div>
                                 <strong>Pauzelaadvraag</strong>
-                                <span>Oranje/rode wegvlakken; kleur en dikte lopen op met het aantal pauzepassages binnen het rijtijdvenster.</span>
+                                @if (breakLegend is not null)
+                                {
+                                    <div class="legend-bins">
+                                        @foreach (var bin in breakLegend.Bins)
+                                        {
+                                            <span class="legend-bin">
+                                                <i class="legend-bin-dot" style="background:@bin.Color"></i>
+                                                <strong>@bin.Label</strong>
+                                                <span>@BreakLegendBinLabel(bin) · @bin.LineCount.ToString("N0") wegvlakken</span>
+                                            </span>
+                                        }
+                                    </div>
+                                    <span>Kleur en dikte schalen mee met het aantal pauzepassages in de huidige selectie.</span>
+                                }
+                                else
+                                {
+                                    <span>Oranje/rode wegvlakken; kleur en dikte lopen op met het aantal pauzepassages binnen het rijtijdvenster.</span>
+                                }
                             </div>
                         </div>
                     }
@@ -649,7 +668,7 @@
                         <tbody>
                             @foreach (var row in MapRoadRows())
                             {
-                                <tr>
+                                <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusRoadRowAsync(row)">
                                     <td><strong>@RoadDisplayName(row)</strong></td>
                                     <td>@row.Direction</td>
                                     <td><span>@RoadCoordinateLabel(row)</span></td>
@@ -672,7 +691,10 @@
                         <h3>@SelectedDetail.Title</h3>
                         <span>Kaartselectie actief · @SelectionTypeLabel(SelectedDetail.SelectionType)</span>
                     </div>
-                    <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
+                    <div class="panel-heading-actions">
+                        <button @onclick="RefreshSelectedDetailAsync" disabled="@IsBusy">Scenario bijwerken</button>
+                        <button class="ghost-button" @onclick="ClearMapSelectionAsync" disabled="@IsBusy">Sluit selectie</button>
+                    </div>
                 </div>
 
                 <p class="selection-context-note">
@@ -944,8 +966,218 @@
             </section>
         }
 
+        @if (SelectedStandplaats is not null)
+        {
+            <section id="selection-detail" class="selection-panel map-selection-detail standplaats-panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>@SelectedStandplaats.Depot.Name</h3>
+                        <span>Kaartselectie actief · Standplaatsselectie (@(SelectedStandplaats.IsCharter ? "charter" : "PostNL-wagenpark"))</span>
+                    </div>
+                    <div class="panel-heading-actions">
+                        <button class="ghost-button" @onclick="ClearMapSelectionAsync">Sluit selectie</button>
+                    </div>
+                </div>
+
+                <p class="selection-context-note">
+                    Alle gegevens hieronder horen alleen bij de standplaats die je op de kaart hebt aangeklikt.
+                    Dit is vaste wagenparkdata uit de standplaatsen-Excel en wordt niet beperkt door de rittenfilters in de zijbalk.
+                </p>
+
+                <div class="metric-row compact">
+                    <div class="metric"><span>Voertuigen</span><strong>@SelectedStandplaats.Depot.Vehicles.ToString("N0")</strong></div>
+                    <div class="metric"><span>Met ritten in data</span><strong>@SelectedStandplaats.Depot.MatchedInTrips.ToString("N0")</strong></div>
+                    <div class="metric"><span>Regio</span><strong>@(string.IsNullOrWhiteSpace(SelectedStandplaats.Depot.Regio) ? "—" : SelectedStandplaats.Depot.Regio)</strong></div>
+                    <div class="metric"><span>Type locatie</span><strong>@(string.IsNullOrWhiteSpace(SelectedStandplaats.Depot.TypeLocatie) ? "—" : SelectedStandplaats.Depot.TypeLocatie)</strong></div>
+                </div>
+
+                <div class="table-panel nested-table">
+                    <div class="panel-heading">
+                        <h3>Voertuigen op deze standplaats</h3>
+                        <span>@SelectedStandplaats.Depot.VehicleList.Length.ToString("N0") voertuigen</span>
+                    </div>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Kenteken/vloot</th>
+                                    <th>Merk</th>
+                                    <th>Soort voertuig</th>
+                                    <th>Brandstof</th>
+                                    <th>Ritten in data</th>
+                                    <th>Km in data</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var vehicle in SelectedStandplaats.Depot.VehicleList.OrderByDescending(x => x.TripsInData).ThenBy(x => x.Kenteken).Take(80))
+                                {
+                                    <tr>
+                                        <td><strong>@(string.IsNullOrWhiteSpace(vehicle.Kenteken) ? vehicle.Vlootnummer : vehicle.Kenteken)</strong></td>
+                                        <td>@vehicle.Merk</td>
+                                        <td>@vehicle.SoortVoertuig</td>
+                                        <td>@vehicle.SoortBrandstof</td>
+                                        <td>@vehicle.TripsInData.ToString("N0")</td>
+                                        <td>@vehicle.KmInData.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (SelectedStandplaats.Depot.VehicleList.Length > 80)
+                    {
+                        <p class="selection-message">+@((SelectedStandplaats.Depot.VehicleList.Length - 80).ToString("N0")) voertuigen niet getoond.</p>
+                    }
+                </div>
+
+                <p class="selection-message">@SelectedStandplaats.Disclaimer</p>
+            </section>
+        }
+
         @if (!HasActiveMapSelection)
         {
+            <section class="content-grid hotspot-grid">
+                <div class="table-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Drukste pauzevraag-wegvlakken</h3>
+                            <span>Gerangschikt op pauzepassages</span>
+                        </div>
+                    </div>
+                    @if (!ShowRoadBreakDemand)
+                    {
+                        <p class="hotspot-empty">Zet de kaartlaag Pauzelaadvraag aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableBreakDemandLayerAsync">Laag inschakelen</button></p>
+                    }
+                    else if (MapOverview is null || MapOverview.TopBreakSegments.Length == 0)
+                    {
+                        <p class="hotspot-empty">Geen pauzevraag-wegvlakken in de huidige filters.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Locatie</th>
+                                        <th>Rijrichting</th>
+                                        <th>Voertuigen</th>
+                                        <th>Passages</th>
+                                        <th>Piek</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var segment in MapOverview.TopBreakSegments)
+                                    {
+                                        <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusBreakSegmentAsync(segment)">
+                                            <td><span>@segment.Lat1.ToString("0.000"), @segment.Lon1.ToString("0.000")</span></td>
+                                            <td>@segment.Direction</td>
+                                            <td>@segment.Vehicles.ToString("N0")</td>
+                                            <td><strong>@segment.Passages.ToString("N0")</strong></td>
+                                            <td>@segment.PeakMw.ToString("N2") MW</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+                <div class="table-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Drukste stilstandlocaties</h3>
+                            <span>Gerangschikt op stilstandmomenten</span>
+                        </div>
+                    </div>
+                    @if (!ShowOvernight)
+                    {
+                        <p class="hotspot-empty">Zet de kaartlaag Vaste stilstandlocaties aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableOvernightLayerAsync">Laag inschakelen</button></p>
+                    }
+                    else if (MapOverview is null || MapOverview.TopDepots.Length == 0)
+                    {
+                        <p class="hotspot-empty">Geen stilstandlocaties in de huidige filters.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Locatie</th>
+                                        <th>Voertuigen</th>
+                                        <th>Stilstanden</th>
+                                        <th>Publieke laadvraag</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var depot in MapOverview.TopDepots)
+                                    {
+                                        <tr class="clickable-row" title="Klik om deze locatie op de kaart te selecteren" @onclick="() => FocusDepotAsync(depot)">
+                                            <td><strong>@depot.Address</strong></td>
+                                            <td>@depot.UniqueVehicles.ToString("N0")</td>
+                                            <td>@depot.Events.ToString("N0")</td>
+                                            <td>@depot.ShortageMwh.ToString("N1") MWh</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+                <div class="table-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Drukste standplaatsen</h3>
+                            <span>Gerangschikt op voertuigen</span>
+                        </div>
+                    </div>
+                    @if (!ShowStandplaatsen && !ShowCharterStandplaatsen)
+                    {
+                        <p class="hotspot-empty">Zet de kaartlaag Standplaatsen of Charterstandplaatsen aan om dit overzicht te vullen. <button type="button" class="ghost-button" @onclick="EnableStandplaatsLayersAsync">Lagen inschakelen</button></p>
+                    }
+                    else if (MapOverview is null || MapOverview.TopStandplaatsen.Length == 0)
+                    {
+                        <p class="hotspot-empty">Geen standplaatsen beschikbaar.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Standplaats</th>
+                                        <th>Regio</th>
+                                        <th>Voertuigen</th>
+                                        <th>Met ritten</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var standplaats in MapOverview.TopStandplaatsen)
+                                    {
+                                        <tr class="clickable-row" title="Klik om deze standplaats op de kaart te selecteren" @onclick="() => FocusStandplaatsAsync(standplaats)">
+                                            <td>
+                                                <strong>@standplaats.Name</strong>
+                                                @if (standplaats.IsCharter)
+                                                {
+                                                    <span class="standplaats-chip charter">Charter</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="standplaats-chip">PostNL</span>
+                                                }
+                                            </td>
+                                            <td>@standplaats.Regio</td>
+                                            <td>@standplaats.Vehicles.ToString("N0")</td>
+                                            <td>@standplaats.MatchedInTrips.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </section>
+
             <section class="content-grid">
                 <div class="table-panel">
                     <div class="panel-heading">
@@ -965,7 +1197,7 @@
                             <tbody>
                                 @foreach (var row in Dashboard?.TopStops.Take(12) ?? [])
                                 {
-                                    <tr>
+                                    <tr class="clickable-row" title="Klik om deze stoplocatie op de kaart te selecteren" @onclick="() => FocusStopAsync(row)">
                                         <td>
                                             <strong>@(string.IsNullOrWhiteSpace(row.Name) ? row.Address : row.Name)</strong>
                                             <span>@row.Lat.ToString("0.000"), @row.Lon.ToString("0.000")</span>
@@ -999,7 +1231,7 @@
                             <tbody>
                                 @foreach (var row in Dashboard?.TopRoadSegments.Take(12) ?? [])
                                 {
-                                    <tr>
+                                    <tr class="clickable-row" title="Klik om dit wegvlak op de kaart te selecteren" @onclick="() => FocusRoadRowAsync(row)">
                                         <td><span>@row.Lat1.ToString("0.000"), @row.Lon1.ToString("0.000")</span></td>
                                         <td>@row.Direction</td>
                                         <td>@row.LengthKm.ToString("N1") km</td>
@@ -1100,9 +1332,13 @@
     private string? SelectedDepotId { get; set; }
     private RoadSelection? SelectedRoad { get; set; }
     private StopLocationDetailRequest? SelectedStopLocation { get; set; }
+    private StandplaatsSelection? SelectedStandplaats { get; set; }
+    private MapOverviewState? MapOverview { get; set; }
     private int? SelectedDemandDay { get; set; }
     private int? SelectedDemandHour { get; set; }
     private VehicleDemandPopup? DemandPopup { get; set; }
+
+    private sealed record StandplaatsSelection(FleetDepot Depot, bool IsCharter, string SourceLabel, string Disclaimer);
 
     private string TransportMode { get; set; } = "Alles";
     private string DateFromText { get; set; } = "";
@@ -1144,7 +1380,7 @@
     private bool ChargerAccessPrivate { get; set; }
     private string? OpenLayerInfoId { get; set; }
     private double MaxVehicleKw => ScenarioMcsEnabled ? 1_500 : 400;
-    private bool HasActiveMapSelection => SelectedDetail is not null;
+    private bool HasActiveMapSelection => SelectedDetail is not null || SelectedStandplaats is not null;
 
     private void ToggleLayerInfo(string layerId)
     {
@@ -1192,7 +1428,7 @@
             StateHasChanged();
         }
 
-        if (PendingSelectionScroll && MapReady && SelectedDetail is not null)
+        if (PendingSelectionScroll && MapReady && HasActiveMapSelection)
         {
             PendingSelectionScroll = false;
             await ScrollToSelectionDetailAsync();
@@ -1215,7 +1451,9 @@
         SelectedDepotId = null;
         SelectedRoad = null;
         SelectedStopLocation = null;
+        SelectedStandplaats = null;
         SelectedRoadBreakDemand = null;
+        MapOverview = null;
         PendingSelectionScroll = false;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
@@ -1516,7 +1754,8 @@
         SelectedRoad = null;
         SelectedRoadBreakDemand = null;
         SelectedStopLocation = null;
-        PendingSelectionScroll = false;
+        SelectedStandplaats = null;
+        PendingSelectionScroll = true;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
@@ -1538,7 +1777,8 @@
         SelectedDepotId = null;
         SelectedRoad = null;
         SelectedRoadBreakDemand = null;
-        PendingSelectionScroll = false;
+        SelectedStandplaats = null;
+        PendingSelectionScroll = true;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
@@ -1554,12 +1794,161 @@
         SelectedDepotId = null;
         SelectedStopLocation = null;
         SelectedRoadBreakDemand = null;
+        SelectedStandplaats = null;
         PendingSelectionScroll = true;
         SelectedDemandDay = null;
         SelectedDemandHour = null;
         DemandPopup = null;
         await RefreshSelectedDetailAsync();
         StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task SelectStandplaatsAsync(string depotId, bool isCharter)
+    {
+        var response = isCharter
+            ? await Fleet.GetCharterDepotsAsync(CancellationToken.None)
+            : await Fleet.GetDepotsAsync(CancellationToken.None);
+        var depot = response.Depots.FirstOrDefault(d => d.DepotId == depotId);
+        if (depot is null)
+        {
+            return;
+        }
+
+        SelectedStandplaats = new StandplaatsSelection(depot, isCharter, response.SourceLabel, response.Disclaimer);
+        SelectedDetail = null;
+        SelectedDepotId = null;
+        SelectedRoad = null;
+        SelectedStopLocation = null;
+        SelectedRoadBreakDemand = null;
+        PendingSelectionScroll = true;
+        SelectedDemandDay = null;
+        SelectedDemandHour = null;
+        DemandPopup = null;
+        await ClearSelectionHeatAsync();
+        await ClearRoadSelectionAsync();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public Task UpdateMapOverviewAsync(MapOverviewState overview)
+    {
+        MapOverview = overview;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task ClearMapSelectionAsync()
+    {
+        SelectedDetail = null;
+        SelectedRoadBreakDemand = null;
+        SelectedDepotId = null;
+        SelectedRoad = null;
+        SelectedStopLocation = null;
+        SelectedStandplaats = null;
+        PendingSelectionScroll = false;
+        SelectedDemandDay = null;
+        SelectedDemandHour = null;
+        DemandPopup = null;
+        await ClearSelectionHeatAsync();
+        await ClearRoadSelectionAsync();
+    }
+
+    private async Task FocusBreakSegmentAsync(MapOverviewBreakSegment segment)
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.focusBreakSegment", segment.SegmentId, segment.Lat1, segment.Lon1, segment.Lat2, segment.Lon2);
+        }
+
+        await SelectRoadAsync(segment.Lat1, segment.Lon1, segment.Lat2, segment.Lon2, segment.RadiusKm);
+    }
+
+    private async Task FocusRoadRowAsync(RoadLine row)
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.focusRoadSegment", row.SegmentId, row.Lat1, row.Lon1, row.Lat2, row.Lon2);
+        }
+
+        await SelectRoadAsync(row.Lat1, row.Lon1, row.Lat2, row.Lon2, row.SelectionRadiusKm);
+    }
+
+    private async Task FocusDepotAsync(MapOverviewDepot depot)
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.focusPoint", depot.Lat, depot.Lon);
+        }
+
+        await SelectDepotAsync(depot.DepotId);
+    }
+
+    private async Task FocusStandplaatsAsync(MapOverviewStandplaats standplaats)
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.focusPoint", standplaats.Lat, standplaats.Lon);
+        }
+
+        await SelectStandplaatsAsync(standplaats.DepotId, standplaats.IsCharter);
+    }
+
+    private async Task FocusStopAsync(DashboardStop stop)
+    {
+        if (MapReady)
+        {
+            await JS.InvokeVoidAsync("routePlannerMap.focusPoint", stop.Lat, stop.Lon);
+        }
+
+        await SelectStopLocationAsync(stop.Lat, stop.Lon, string.IsNullOrWhiteSpace(stop.Name) ? stop.Address : stop.Name);
+    }
+
+    private async Task EnableBreakDemandLayerAsync()
+    {
+        ShowRoadBreakDemand = true;
+        await RefreshMapAsync();
+    }
+
+    private async Task EnableOvernightLayerAsync()
+    {
+        ShowOvernight = true;
+        await RefreshMapAsync();
+    }
+
+    private async Task EnableStandplaatsLayersAsync()
+    {
+        ShowStandplaatsen = true;
+        ShowCharterStandplaatsen = true;
+        await RefreshMapAsync();
+    }
+
+    private static string BreakLegendGradientStyle(RoadBreakDemandLegend legend)
+    {
+        if (legend.GradientStops.Length == 0)
+        {
+            return "";
+        }
+
+        if (legend.GradientStops.Length == 1)
+        {
+            return $"background: {legend.GradientStops[0].Color}";
+        }
+
+        var span = Math.Max(1, legend.MaxPassages - legend.MinPassages);
+        var parts = legend.GradientStops.Select(stop =>
+        {
+            var pct = (stop.Passages - legend.MinPassages) * 100.0 / span;
+            return $"{stop.Color} {pct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%";
+        });
+        return $"background: linear-gradient(90deg, {string.Join(", ", parts)})";
+    }
+
+    private static string BreakLegendBinLabel(RoadBreakDemandLegendBin bin)
+    {
+        return bin.FromPassages == bin.ToPassages
+            ? $"≈ {bin.FromPassages:N0} passages"
+            : $"≈ {bin.FromPassages:N0}–{bin.ToPassages:N0} passages";
     }
 
     private async Task RefreshSelectedDetailAsync()
@@ -1658,6 +2047,7 @@
 
         TransportMode = mode;
         SelectedDetail = null;
+        SelectedStandplaats = null;
         SelectedPowerProfile = null;
         DemandPopup = null;
         await ApplyFiltersAsync();
@@ -1710,7 +2100,7 @@
 
     private async Task ScrollToSelectionDetailAsync()
     {
-        if (MapReady && SelectedDetail is not null)
+        if (MapReady && HasActiveMapSelection)
         {
             await JS.InvokeVoidAsync("routePlannerMap.scrollToSelectionDetail", "selection-detail");
         }
