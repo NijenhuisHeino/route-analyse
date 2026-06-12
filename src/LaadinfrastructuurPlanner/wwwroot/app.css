@@ -1709,7 +1709,7 @@ td span {
   margin-top: 4px;
 }
 
-.legend-bin {
+.legend-item .legend-bin {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -1718,16 +1718,17 @@ td span {
   line-height: 1.3;
 }
 
-.legend-bin strong {
+.legend-item .legend-bin strong {
   font-size: 11px;
 }
 
-.legend-bin span {
+.legend-item .legend-bin span {
   margin-top: 0;
   display: inline;
 }
 
 .legend-bin-dot {
+  display: inline-block;
   flex: 0 0 auto;
   width: 9px;
   height: 9px;

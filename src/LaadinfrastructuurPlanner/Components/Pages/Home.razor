@@ -1985,10 +1985,11 @@
             return $"background: {legend.GradientStops[0].Color}";
         }
 
-        var span = Math.Max(1, legend.MaxPassages - legend.MinPassages);
-        var parts = legend.GradientStops.Select(stop =>
+        // Gelijkmatige kleurverdeling in het balkje: de passagewaarden zijn zo
+        // scheef verdeeld dat positioneren op waarde vrijwel alleen rood toont.
+        var parts = legend.GradientStops.Select((stop, index) =>
         {
-            var pct = (stop.Passages - legend.MinPassages) * 100.0 / span;
+            var pct = index * 100.0 / (legend.GradientStops.Length - 1);
             return $"{stop.Color} {pct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%";
         });
         return $"background: linear-gradient(90deg, {string.Join(", ", parts)})";
