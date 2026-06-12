@@ -27,6 +27,8 @@ public sealed class FleetDataService
 
     private FleetData? _data;
     private FleetData? _charterData;
+    private string? _loadError;
+    private string? _charterLoadError;
     private Dictionary<string, GeocodeEntry> _geocodeCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _geocodeLoaded;
 
@@ -49,7 +51,7 @@ public sealed class FleetDataService
         {
             return new FleetDepotsResponse(
                 "missing",
-                "Wagenpark-Excel niet gevonden op de verwachte locatie.",
+                _loadError ?? "Wagenpark-Excel niet gevonden op de verwachte locatie.",
                 _options.FleetExcelPath ?? "(niet geconfigureerd)",
                 Disclaimer,
                 0,
@@ -66,7 +68,7 @@ public sealed class FleetDataService
         {
             return new FleetDepotsResponse(
                 "missing",
-                "Charterstandplaatsen-Excel niet gevonden op de verwachte locatie.",
+                _charterLoadError ?? "Charterstandplaatsen-Excel niet gevonden op de verwachte locatie.",
                 _options.CharterFleetExcelPath ?? "(niet geconfigureerd)",
                 "Charterstandplaatsen uit aparte Excel; markers zijn gegeocodeerd op adres, plaats en land.",
                 0,
@@ -168,16 +170,41 @@ public sealed class FleetDataService
                 return null;
             }
 
-            var loaded = dataset == FleetDataset.Charter
-                ? LoadCharterFromExcel(path)
-                : LoadFromExcel(path);
+            FleetData loaded;
+            try
+            {
+                loaded = dataset == FleetDataset.Charter
+                    ? LoadCharterFromExcel(path)
+                    : LoadFromExcel(path);
+            }
+            catch (Exception ex)
+            {
+                // Google Drive kan een bestand als nog-niet-gematerialiseerde placeholder
+                // serveren; lezen levert dan een corrupt zip-archief op. Niet cachen,
+                // zodat een volgende aanvraag het opnieuw probeert zodra Drive klaar is.
+                _logger.LogError(ex, "Standplaatsen-Excel onleesbaar: {Path}", path);
+                var error = "Standplaatsen-Excel kon niet worden gelezen. Controleer of Google Drive het bestand lokaal beschikbaar heeft en probeer het opnieuw.";
+                if (dataset == FleetDataset.Charter)
+                {
+                    _charterLoadError = error;
+                }
+                else
+                {
+                    _loadError = error;
+                }
+
+                return null;
+            }
+
             if (dataset == FleetDataset.Charter)
             {
                 _charterData = loaded;
+                _charterLoadError = null;
             }
             else
             {
                 _data = loaded;
+                _loadError = null;
             }
 
             return loaded;

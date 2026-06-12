@@ -20,7 +20,18 @@
     <ReconnectModal />
     <script src="https://unpkg.com/maplibre-gl@5.20.1/dist/maplibre-gl.js"></script>
     <script src="@Assets["plannerMap.js"]"></script>
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["_framework/blazor.web.js"]" autostart="false"></script>
+    <script>
+        // Zware DuckDB-queries kunnen de server-keepalive vertragen; de standaard
+        // client-timeout van 30s verbreekt het circuit dan onnodig.
+        Blazor.start({
+            circuit: {
+                configureSignalR: (builder) => {
+                    builder.withServerTimeout(120000).withKeepAliveInterval(10000);
+                }
+            }
+        });
+    </script>
 </body>
 
 </html>

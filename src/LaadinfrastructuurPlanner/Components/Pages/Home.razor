@@ -581,7 +581,7 @@
                     @if (!LegendCollapsed && ShowRoadBreakDemand)
                     {
                         var breakLegend = MapOverview?.BreakDemandLegend;
-                        <div class="legend-item">
+                        <div class="legend-item @(breakLegend is null ? "" : "align-top")">
                             <span class="legend-line road-break-demand-line" style="@(breakLegend is null ? null : BreakLegendGradientStyle(breakLegend))"></span>
                             <div>
                                 <strong>Pauzelaadvraag</strong>
@@ -750,7 +750,7 @@
                     <div class="analysis-card weekly-demand-card">
                         <div class="card-heading">
                             <strong>@(isRoadSelection ? "Piekprofiel pauzelaadvraag per weekuur" : "Piekprofiel vermogensvraag per weekuur")</strong>
-                            <span>@(selectedDemand is null ? (isRoadSelection ? "Geen pauzemomenten" : "Geen stilstandvensters") : $"{selectedDemand.Label} · {selectedDemand.Vehicles:N0} voertuigen · {selectedDemand.RequiredKw:N0} kW")</span>
+                            <span>@(selectedDemand is null ? (isRoadSelection ? "Geen pauzemomenten" : "Geen stilstandvensters") : $"{selectedDemand.Label} · {FormatVoertuigen(selectedDemand.Vehicles)} · {selectedDemand.RequiredKw:N0} kW")</span>
                         </div>
                         <div class="week-demand-heatmap" aria-label="@(isRoadSelection ? "Weekprofiel pauzelaadvraag" : "Weekprofiel vermogensvraag")">
                             <div class="week-grid-corner"></div>
@@ -765,7 +765,7 @@
                                 {
                                     <button class="@WeekCellClass(cell)"
                                             style="@WeekCellStyle(cell)"
-                                            title="@($"{cell.Label}: {cell.Vehicles:N0} voertuigen, {cell.RequiredKw:N0} kW gevraagd")"
+                                            title="@($"{cell.Label}: {FormatVoertuigen(cell.Vehicles)}, {cell.RequiredKw:N0} kW gevraagd")"
                                             @onclick="() => OpenDemandPopup(cell)">
                                         <span>@cell.RequiredKw.ToString("N0")</span>
                                     </button>
@@ -782,7 +782,7 @@
                             <div class="week-demand-detail">
                                 <strong>@selectedDemand.Label</strong>
                                 <span>@selectedDemand.RequiredKw.ToString("N0") kW gevraagd (@selectedDemand.RequiredMw.ToString("N2") MW)</span>
-                                <span>@selectedDemand.Vehicles.ToString("N0") voertuigen aanwezig</span>
+                                <span>@FormatVoertuigen(selectedDemand.Vehicles) aanwezig</span>
                                 <span>Kentekens: @JoinValues(selectedDemand.Kentekens, "geen kentekens bekend")</span>
                                 <span>Voertuigcodes: @JoinValues(selectedDemand.Wagencodes, "geen voertuigcodes bekend")</span>
                             </div>
@@ -2168,12 +2168,17 @@
         SelectedDemandHour = hour;
     }
 
+    private static string FormatVoertuigen(long count)
+    {
+        return count == 1 ? "1 voertuig" : $"{count:N0} voertuigen";
+    }
+
     private void OpenDemandPopup(WeeklyDemandCell cell)
     {
         SelectDemandBlock(cell.DayIndex, cell.Hour);
         DemandPopup = new VehicleDemandPopup(
             cell.Label,
-            $"{cell.Vehicles:N0} voertuigen · {FormatPower(cell.RequiredKw)} gevraagd",
+            $"{FormatVoertuigen(cell.Vehicles)} · {FormatPower(cell.RequiredKw)} gevraagd",
             cell.VehicleDemands
                 .Select(vehicle => new VehicleDemandPopupRow(
                     vehicle.Wagencode,

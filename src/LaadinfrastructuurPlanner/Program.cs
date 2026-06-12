@@ -4,6 +4,11 @@ using LaadinfrastructuurPlanner.Services;
 using Microsoft.AspNetCore.SignalR;
 using System.Net;
 
+// Koude DuckDB-queries bezetten in bursts veel poolthreads; zonder ruime
+// minimumpool missen SignalR-keepalives hun deadline en valt het circuit weg.
+ThreadPool.GetMinThreads(out var minWorker, out var minIo);
+ThreadPool.SetMinThreads(Math.Max(minWorker, 64), Math.Max(minIo, 64));
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
@@ -11,6 +16,8 @@ builder.Services.AddRazorComponents()
 builder.Services.Configure<HubOptions>(options =>
 {
     options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+    options.KeepAliveInterval = TimeSpan.FromSeconds(10);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(120);
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(_ => RouteAnalysisOptionsFactory.FromContentRoot(builder.Environment.ContentRootPath, builder.Configuration));
